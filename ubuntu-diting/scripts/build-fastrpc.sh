@@ -25,7 +25,7 @@ build_emulated() {
 	sudo mkdir -p "$CH/build/fastrpc"
 	sudo cp -a "$b/src/." "$CH/build/fastrpc/"
 	inch apt-get -y -q install --no-install-recommends autoconf automake libtool \
-		pkg-config libyaml-dev gcc make libc6-dev > /dev/null
+		pkg-config libyaml-dev libbsd-dev gcc make libc6-dev > /dev/null
 	inch sh -ec 'cd /build/fastrpc && sh ./autogen.sh &&
 		./configure --prefix=/usr --libdir=/usr/lib/aarch64-linux-gnu &&
 		make -j"$(nproc)" && make install DESTDIR=/build/fastrpc-root' \
@@ -62,7 +62,7 @@ Package: $PKG
 Version: $PKG_VERSION
 Architecture: arm64
 Maintainer: ubuntu-diting local build <ubuntu-diting@localhost>
-Depends: libc6, libyaml-0-2
+Depends: libc6, libyaml-0-2, libbsd0
 Section: libs
 Priority: optional
 Homepage: https://github.com/qualcomm/fastrpc
