@@ -12,7 +12,34 @@ SRC="$DITING_TOP/references/hexagonrpc"
 PATCHES="$UD/packages/hexagonrpc/patches"
 [ "$(git -C "$SRC" rev-parse HEAD 2>/dev/null)" = "$HEXAGONRPC_COMMIT" ] ||
 	die "need $SRC at $HEXAGONRPC_COMMIT (make sources)"
-[ "$(dpkg --print-architecture)" = arm64 ] || die "hexagonrpc is built natively on an arm64 host"
+cross_args=()
+if [ "$(dpkg --print-architecture)" != arm64 ]; then
+	command -v aarch64-linux-gnu-gcc >/dev/null 2>&1 ||
+		die "on a non-arm64 host, hexagonrpc is cross-built and needs aarch64-linux-gnu-gcc"
+	crossfile="$WORK/hexagonrpc-cross.ini"
+	cat > "$crossfile" <<X
+[binaries]
+c = 'aarch64-linux-gnu-gcc'
+ar = 'aarch64-linux-gnu-ar'
+strip = 'aarch64-linux-gnu-strip'
+
+[host_machine]
+system = 'linux'
+cpu_family = 'aarch64'
+cpu = 'aarch64'
+endian = 'little'
+X
+	cross_args=(--cross-file "$crossfile")
+	log "cross-building hexagonrpcd with aarch64-linux-gnu-gcc"
+fi
+# Cross-compiled test binaries cannot run on the host (no arm64 loader).
+run_tests() {
+	if [ ${#cross_args[@]} -gt 0 ]; then
+		warn "cross build: skipping meson test (binaries are arm64)"
+		return 0
+	fi
+	meson test -C build
+}
 patches=("$PATCHES"/*.patch)
 n_patches=${#patches[@]}
 PKG_VERSION="0.5~git$(git -C "$SRC" show -s --format=%cd --date=format:%Y%m%d HEAD).$(git -C "$SRC" rev-parse --short=7 HEAD)+diting$n_patches-1"
@@ -25,8 +52,8 @@ log "building hexagonrpc $HEXAGONRPC_COMMIT + $n_patches patches"
 for p in "${patches[@]}"; do
 	patch -d "$b/src" -p1 --no-backup-if-mismatch -s < "$p" || die "patch $(basename "$p") failed"
 done
-(cd "$b/src" && meson setup --prefix=/usr --libdir=lib/aarch64-linux-gnu --buildtype=release build &&
-	ninja -C build && meson test -C build && DESTDIR="$b/root" meson install -C build) \
+(cd "$b/src" && meson setup "${cross_args[@]}" --prefix=/usr --libdir=lib/aarch64-linux-gnu --buildtype=release build &&
+	ninja -C build && run_tests && DESTDIR="$b/root" meson install -C build) \
 	> "$OUT/logs/hexagonrpc-build.log" 2>&1 ||
 	{ tail -30 "$OUT/logs/hexagonrpc-build.log"; die "hexagonrpc build failed"; }
 # runtime only; upstream systemd units are not used: device-xiaomi-diting

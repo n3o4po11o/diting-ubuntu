@@ -9,7 +9,13 @@ PKG=fastrpc-diting
 SRC="$DITING_TOP/references/fastrpc"
 [ "$(git -C "$SRC" rev-parse HEAD 2>/dev/null)" = "$FASTRPC_COMMIT" ] ||
 	die "need $SRC at $FASTRPC_COMMIT (make sources)"
-[ "$(dpkg --print-architecture)" = arm64 ] || die "fastrpc is built natively on an arm64 host"
+cross=()
+if [ "$(dpkg --print-architecture)" != arm64 ]; then
+	command -v aarch64-linux-gnu-gcc >/dev/null 2>&1 ||
+		die "on a non-arm64 host, fastrpc is cross-built and needs aarch64-linux-gnu-gcc"
+	cross=(--host=aarch64-linux-gnu CC=aarch64-linux-gnu-gcc)
+	log "cross-building fastrpc with aarch64-linux-gnu-gcc"
+fi
 PKG_VERSION="0.0~git$(git -C "$SRC" show -s --format=%cd --date=format:%Y%m%d HEAD).$(git -C "$SRC" rev-parse --short=7 HEAD)-1"
 
 b="$WORK/fastrpc"
@@ -17,7 +23,7 @@ rm -rf "$b"
 mkdir -p "$b/src" "$b/root" "$OUT/debs" "$OUT/logs"
 git -C "$SRC" archive HEAD | tar -x -C "$b/src"
 log "building fastrpc $FASTRPC_COMMIT"
-(cd "$b/src" && sh ./autogen.sh && ./configure --prefix=/usr --libdir=/usr/lib/aarch64-linux-gnu &&
+(cd "$b/src" && sh ./autogen.sh && ./configure "${cross[@]}" --prefix=/usr --libdir=/usr/lib/aarch64-linux-gnu &&
 	make -j"$(nproc)" && make install DESTDIR="$b/root") > "$OUT/logs/fastrpc-build.log" 2>&1 ||
 	{ tail -30 "$OUT/logs/fastrpc-build.log"; die "fastrpc build failed"; }
 # runtime only: no headers, static or libtool archives

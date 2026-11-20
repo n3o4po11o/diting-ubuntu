@@ -1,14 +1,19 @@
 #!/bin/bash
 # Rebuild Ubuntu's phoc with the patches in packages/phoc/ as a local Debian
-# package. Builds natively in a throwaway copy of the arm64 rootfs (the build
-# host must be arm64; no emulation). Needs sudo for the chroot.
+# package. Builds natively in a throwaway copy of the arm64 rootfs (natively
+# on an arm64 host, under qemu-user binfmt elsewhere). Needs sudo for the
+# chroot.
 . "$(dirname "$0")/lib.sh"
 need rsync
 
 ROOTFS="$WORK/rootfs"
 CH="$WORK/phoc-chroot"
 [ -x "$ROOTFS/usr/bin/apt-get" ] || die "no rootfs in $ROOTFS; run make rootfs first"
-[ "$(uname -m)" = aarch64 ] || die "native arm64 build host required"
+if [ "$(uname -m)" != aarch64 ]; then
+	[ -e /proc/sys/fs/binfmt_misc/qemu-aarch64 ] ||
+		die "arm64 emulation (qemu-user binfmt) not registered; see docs/BUILD.md"
+	warn "building under qemu-user emulation (slower than a native arm64 host)"
+fi
 
 cleanup() {
 	for m in dev/pts dev proc sys; do sudo umount "$CH/$m" 2>/dev/null || true; done

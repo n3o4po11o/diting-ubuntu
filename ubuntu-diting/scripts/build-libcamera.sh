@@ -15,7 +15,11 @@ need rsync
 ROOTFS="$WORK/rootfs"
 CH="$WORK/libcamera-chroot"
 [ -x "$ROOTFS/usr/bin/apt-get" ] || die "no rootfs in $ROOTFS; run make rootfs first"
-[ "$(uname -m)" = aarch64 ] || die "native arm64 build host required"
+if [ "$(uname -m)" != aarch64 ]; then
+	[ -e /proc/sys/fs/binfmt_misc/qemu-aarch64 ] ||
+		die "arm64 emulation (qemu-user binfmt) not registered; see docs/BUILD.md"
+	warn "building under qemu-user emulation (slower than a native arm64 host)"
+fi
 
 cleanup() {
 	for m in dev/pts dev proc sys; do sudo umount "$CH/$m" 2>/dev/null || true; done
