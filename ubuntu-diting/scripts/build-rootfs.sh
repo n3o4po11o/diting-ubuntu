@@ -204,7 +204,7 @@ phosh-full)
 		rm -rf /tmp/seedroot /var/lib/snapd/seed && mkdir /tmp/seedroot
 		cd /tmp && snap prepare-image --classic --arch=arm64 \
 			--snap=snapd --snap=bare --snap=core24 --snap=core26 --snap=chromium \
-			--snap=gnome-46-2404 --snap=gtk-common-themes --snap=mesa-2404 --snap=cups \
+			--snap=gnome-core26 --snap=gtk-common-themes --snap=mesa-2404 --snap=mesa-2604 --snap=cups \
 			generic-classic.model /tmp/seedroot
 		mv /tmp/seedroot/var/lib/snapd/seed /var/lib/snapd/seed
 		rm -rf /tmp/seedroot /tmp/generic-classic.model'
