@@ -31,6 +31,7 @@ build_emulated() {
 		make -j"$(nproc)" && make install DESTDIR=/build/fastrpc-root' \
 		> "$OUT/logs/fastrpc-build.log" 2>&1
 	sudo cp -a "$CH/build/fastrpc-root/." "$b/root/"
+	sudo chown -R "$(id -u):$(id -g)" "$b/root"
 }
 PKG_VERSION="0.0~git$(git -C "$SRC" show -s --format=%cd --date=format:%Y%m%d HEAD).$(git -C "$SRC" rev-parse --short=7 HEAD)-1"
 
