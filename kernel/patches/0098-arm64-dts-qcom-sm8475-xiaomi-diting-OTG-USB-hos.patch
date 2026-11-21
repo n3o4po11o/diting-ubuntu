@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: royka1 <397414+royka1@users.noreply.github.com>
+Date: Sat, 21 Nov 2026 16:30:00 +0000
+Subject: [PATCH 98/98] arm64: dts: qcom: sm8475-xiaomi-diting: OTG (USB host mode)
+
+Switch the USB controller from the fixed peripheral of the bring-up to
+dual role and wire the role switch to pmic_glink's UCSI connector, as
+the sm8650 boards do: plugging an OTG adapter enumerates devices on
+the eUSB2 (high-speed only) bus. The NCM+ACM gadget keeps working
+when the port is in device role.
+
+---
+ arch/arm64/boot/dts/qcom/sm8475-xiaomi-diting.dts | 33 +++++++++++++++++++++++++++++++++
+ 1 file changed, 33 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/sm8475-xiaomi-diting.dts b/arch/arm64/boot/dts/qcom/sm8475-xiaomi-diting.dts
+index 3c936cd0d..a1e2b3f4c 100644
+--- a/arch/arm64/boot/dts/qcom/sm8475-xiaomi-diting.dts
++++ b/arch/arm64/boot/dts/qcom/sm8475-xiaomi-diting.dts
+@@ -1093,3 +1093,36 @@ &usb_1_hsphy {
+ 			};
+ 		};
+ 	};
+ };
++
++&usb_1 {
++	dr_mode = "otg";
++	usb-role-switch;
++};
++
++&usb_1_dwc3_hs {
++	remote-endpoint = <&pmic_glink_hs_in>;
++};
++
++&{/pmic-glink} {
++	connector@0 {
++		compatible = "usb-c-connector";
++		reg = <0>;
++		power-role = "dual";
++		data-role = "dual";
++
++		ports {
++			#address-cells = <1>;
++			#size-cells = <0>;
++
++			port@0 {
++				reg = <0>;
++
++				pmic_glink_hs_in: endpoint {
++					remote-endpoint = <&usb_1_dwc3_hs>;
++				};
++			};
++		};
++	};
++};
