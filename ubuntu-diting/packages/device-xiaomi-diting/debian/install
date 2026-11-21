@@ -53,3 +53,5 @@ fastrpc/xiaomi-diting.yaml usr/share/qcom/conf.d
 mask/etc/systemd/system/rmtfs-dir.service etc/systemd/system
 src/diting-modem-redial usr/lib/diting
 systemd/diting-modem-redial.service usr/lib/systemd/system
+src/diting-bt-fixup usr/lib/diting
+systemd/diting-bt-fixup.service usr/lib/systemd/system

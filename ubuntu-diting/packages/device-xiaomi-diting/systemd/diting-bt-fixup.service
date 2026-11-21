@@ -1,0 +1,15 @@
+[Unit]
+Description=Give the server-built boot images a Bluetooth address
+# before diting-firmware-setup: its --reboot then boots the new images
+After=systemd-machine-id-commit.service local-fs.target
+Before=diting-firmware-setup.service
+ConditionPathExists=!/var/lib/diting/bt-address-fixed
+ConditionPathExists=/boot/diting
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/diting/diting-bt-fixup
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

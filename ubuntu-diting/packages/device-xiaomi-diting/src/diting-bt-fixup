@@ -1,0 +1,20 @@
+#!/bin/sh
+# First boot: server-built boot images carry no Bluetooth address (no
+# machine-id exists at build time, so diting-mkbootimg skipped the
+# local-bd-address DT property and bluetoothd refuses the controller).
+# Persist an address, regenerate the boot images on this machine and
+# write them to the boot partitions; the firmware-setup reboot (or any
+# later reboot) boots them. Runs once (marker in /var/lib/diting).
+set -e
+marker=/var/lib/diting/bt-address-fixed
+[ -e "$marker" ] && exit 0
+version="$(uname -r)"
+[ -e "/boot/diting/boot-$version.img" ] || exit 0
+mkdir -p /etc/diting /var/lib/diting
+[ -s /etc/diting/bt-address ] || /usr/lib/diting/diting-bt-address > /etc/diting/bt-address
+/etc/kernel/postinst.d/zz-diting-bootimg "$version"
+slot="$(/usr/lib/diting/diting-mark-boot-successful --print-slot)"
+dd if="/boot/diting/boot-$version.img" of="/dev/disk/by-partlabel/boot_$slot" bs=4M conv=fsync
+dd if="/boot/diting/vendor_boot-$version.img" of="/dev/disk/by-partlabel/vendor_boot_$slot" bs=4M conv=fsync
+touch "$marker"
+echo "diting-bt-fixup: boot images with the Bluetooth address written to boot_$slot"
