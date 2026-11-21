@@ -8,7 +8,10 @@ sets that bit through its boot control HAL; this does the same for Linux.
 
 Only bit 54 (successful) of the active boot_<slot> entry changes, in the
 primary and the backup GPT, with the CRCs recomputed. Nothing is written if
-the tables do not look exactly as expected.
+the tables do not look exactly as expected. Some vendor flash tools never
+update the backup table's entry CRC; a stale backup array is rewritten from
+the primary table (the one ABL reads) before anything else is changed.
+Reading the slot (--print-slot) only needs the primary table.
 
   diting-mark-boot-successful [--dry-run]
   diting-mark-boot-successful --print-slot   (prints "a" or "b", read-only)
@@ -35,8 +38,14 @@ def disk_of(partlabel):
         return f"/dev/{disk}", int(f.read())
 
 
+class GptEntryCrcError(Exception):
+    """The partition entry array does not match the header's entry CRC."""
+
+
 class Gpt:
-    def __init__(self, fd, ss, lba):
+    # repair_from: another Gpt (the primary) whose entry array replaces
+    # ours when the stored one fails its CRC check
+    def __init__(self, fd, ss, lba, repair_from=None):
         self.fd, self.ss, self.lba = fd, ss, lba
         self.hdr = bytearray(os.pread(fd, 92, lba * ss))
         if self.hdr[:8] != b"EFI PART":
@@ -52,7 +61,9 @@ class Gpt:
             die(f"bad header CRC at LBA {lba}")
         self.ents = bytearray(os.pread(fd, self.n * self.esz, self.elba * ss))
         if zlib.crc32(self.ents) != ecrc:
-            die(f"bad partition entry CRC (header at LBA {lba})")
+            if repair_from is None:
+                raise GptEntryCrcError(f"bad partition entry CRC (header at LBA {lba})")
+            self.ents = bytearray(repair_from.ents)
 
     def _hcrc(self):
         h = bytearray(self.hdr)
@@ -95,17 +106,27 @@ def main():
 
     fd = os.open(dev, os.O_RDONLY if dry else os.O_RDWR)
     primary = Gpt(fd, ss, 1)
-    backup = Gpt(fd, ss, primary.alt)
-    if (backup.n, backup.esz, backup.alt) != (primary.n, primary.esz, 1):
-        die("primary and backup GPT headers do not match")
 
     active = [s for s in SLOTS
               if (primary.attr(primary.find(f"boot_{s}")) >> ACTIVE) & 1]
     if len(active) != 1:
         die(f"expected exactly one active slot, found {active}")
     if print_slot:
+        # read-only: the primary table is enough, and some vendor flash
+        # tools leave the backup table's entry CRC stale
         print(active[0])
         return
+    try:
+        backup = Gpt(fd, ss, primary.alt)
+    except GptEntryCrcError as err:
+        print(f"diting-mark-boot-successful: {err}", file=sys.stderr)
+        if dry:
+            die("dry run; would rewrite the backup table from the primary one")
+        print("diting-mark-boot-successful: rewriting the backup table from "
+              "the primary one", file=sys.stderr)
+        backup = Gpt(fd, ss, primary.alt, repair_from=primary)
+    if (backup.n, backup.esz, backup.alt) != (primary.n, primary.esz, 1):
+        die("primary and backup GPT headers do not match")
     name = f"boot_{active[0]}"
     i, j = primary.find(name), backup.find(name)
     if i is None or i != j:
