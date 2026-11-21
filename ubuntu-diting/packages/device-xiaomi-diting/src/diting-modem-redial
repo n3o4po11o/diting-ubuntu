@@ -12,6 +12,7 @@ down=0
 dead=0
 deaths=0
 missing=0
+backoff=0
 gsm_con() {
 	nmcli -t -f TYPE,NAME connection show 2>/dev/null |
 		awk -F: '$1 == "gsm" { print $2; exit }'
@@ -48,6 +49,18 @@ recover() {	# recover <level>: 1 redial, 2 ModemManager restart, 3 modem restart
 }
 while :; do
 	sleep 60
+	if [ "$backoff" -gt 0 ]; then
+		backoff=$((backoff - 1))
+		continue
+	fi
+	# A network that throttles PDN establishment ("pdn-*-call-throttled")
+	# prolongs the throttle for every retry: back off for 15 minutes
+	if journalctl -u ModemManager --since "-10 min" --no-pager 2>/dev/null |
+		grep -q throttled; then
+		backoff=15
+		logger -t diting-modem-redial "connection throttled by the network; backing off"
+		continue
+	fi
 	state=$(nmcli -t -f GENERAL.STATE device show qrtr0 2>/dev/null)
 	case "$state" in
 	*connecting*)
