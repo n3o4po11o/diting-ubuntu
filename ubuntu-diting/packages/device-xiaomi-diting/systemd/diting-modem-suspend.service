@@ -1,0 +1,12 @@
+[Unit]
+Description=Drop the cellular data bearer before suspend
+After=network-pre.target
+Before=suspend.target
+
+[Service]
+Type=oneshot
+Environment=MODE=suspend
+ExecStart=/usr/lib/diting/diting-modem-suspend
+
+[Install]
+WantedBy=suspend.target

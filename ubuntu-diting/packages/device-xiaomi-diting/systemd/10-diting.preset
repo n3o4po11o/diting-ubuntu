@@ -19,3 +19,5 @@ disable rmtfs-dir.service
 enable diting-modem-redial.service
 enable diting-bt-fixup.service
 enable diting-mm-resume.service
+enable diting-modem-suspend.service
+enable diting-modem-resume.service

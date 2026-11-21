@@ -1,0 +1,39 @@
+#!/bin/sh
+# Suspend-safe cellular: disconnect the bearer before sleep, reconnect
+# after wake. The in-SoC modem stays registered through suspend; only
+# the data path (bearer) is torn down and rebuilt, which avoids the
+# MM/NM/IPA bearer-restore race that loses the modem with an active
+# connection (~every sixth suspend with MM's quick hooks alone).
+CONNECTION="${1:-}"   # NM connection name; default: first gsm connection
+
+gsm_con() {
+	if [ -n "$CONNECTION" ]; then echo "$CONNECTION"; return; fi
+	nmcli -t -f TYPE,NAME connection show --active 2>/dev/null |
+		awk -F: '$1 == "gsm" { print $2; exit }'
+}
+
+case "${MODE:-}" in
+suspend)
+	con="$(gsm_con)"
+	[ -n "$con" ] || exit 0
+	nmcli connection down "$con" >/dev/null 2>&1 || true
+	logger -t diting-modem-suspend "disconnected $con for suspend"
+	;;
+resume)
+	con="$(gsm_con)"
+	# the connection profile, not the active one (it was just dropped)
+	con="$(nmcli -t -f TYPE,NAME connection show 2>/dev/null |
+		awk -F: '$1 == "gsm" { print $2; exit }')"
+	[ -n "$con" ] || exit 0
+	# give MM time to finish its resume sync
+	i=0
+	while [ $i -lt 10 ]; do
+		mmcli -m 0 2>/dev/null |
+			grep -qE "state:.*(registered|connected)" && break
+		i=$((i + 1)); sleep 1
+	done
+	nmcli connection up "$con" >/dev/null 2>&1 || true
+	logger -t diting-modem-suspend "reconnected $con after resume"
+	;;
+esac
+exit 0

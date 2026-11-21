@@ -1,0 +1,15 @@
+[Unit]
+Description=Reconnect cellular data and verify the modem after resume
+# after diting-mm-resume (which restarts MM if the modem is gone)
+After=suspend.target diting-mm-resume.service
+
+[Service]
+Type=oneshot
+Environment=MODE=resume
+ExecStartPre=/bin/sleep 3
+# if the modem is still missing after 3s, restart MM (belt for the
+# quick-hooks gap with active bearers)
+ExecStart=/bin/sh -c 'mmcli -L 2>/dev/null | grep -q Modem/ || systemctl restart ModemManager; sleep 5; /usr/lib/diting/diting-modem-suspend'
+
+[Install]
+WantedBy=suspend.target

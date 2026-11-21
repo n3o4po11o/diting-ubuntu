@@ -56,3 +56,6 @@ systemd/diting-modem-redial.service usr/lib/systemd/system
 src/diting-bt-fixup usr/lib/diting
 systemd/diting-bt-fixup.service usr/lib/systemd/system
 systemd/diting-mm-resume.service usr/lib/systemd/system
+src/diting-modem-suspend usr/lib/diting
+systemd/diting-modem-suspend.service usr/lib/systemd/system
+systemd/diting-modem-resume.service usr/lib/systemd/system
