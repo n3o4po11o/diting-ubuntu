@@ -12,7 +12,7 @@ anyway - log them at debug level.
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/drivers/remoteproc/qcom_q6v5.c b/drivers/remoteproc/qcom_q6v5.c
-index 000000000..000000001 100644
+index 3f2a1b0c..9d8e7f6a 100644
 --- a/drivers/remoteproc/qcom_q6v5.c
 +++ b/drivers/remoteproc/qcom_q6v5.c
 @@ -165,7 +165,7 @@ static irqreturn_t q6v5_handover_interrupt(int irq, void *data)
