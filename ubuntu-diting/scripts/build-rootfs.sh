@@ -317,6 +317,14 @@ rm -rf "$ROOT"/var/lib/apt/lists/* "$ROOT"/tmp/* "$ROOT/etc/resolv.conf.build"
 echo uninitialized > "$ROOT/etc/machine-id"
 rm -f "$ROOT/var/lib/dbus/machine-id"
 ln -s /etc/machine-id "$ROOT/var/lib/dbus/machine-id"
+# Clock floor for the first boot: no usable RTC (the PMIC RTC is read-only
+# for the AP), so a fresh image would start at the RTC's 1972 epoch and
+# snapd's seed assertions would all be "not yet valid". systemd advances
+# the clock to this file's mtime at boot; created with the build time it
+# is a sane floor until NTP takes over (it also keeps working across
+# reboots: updated on sync and on clean shutdowns).
+install -d -m 755 "$ROOT/var/lib/systemd/timesync"
+install -m 644 /dev/null "$ROOT/var/lib/systemd/timesync/clock"
 cleanup
 mounts=()
 ln -sf ../run/systemd/resolve/stub-resolv.conf "$ROOT/etc/resolv.conf"
