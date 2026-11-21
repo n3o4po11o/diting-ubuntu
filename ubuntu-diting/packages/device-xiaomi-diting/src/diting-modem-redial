@@ -10,15 +10,34 @@ IFACE=qmapmux0.0         # gsm data interface of this device
 stuck=0
 down=0
 dead=0
+deaths=0
 gsm_con() {
 	nmcli -t -f TYPE,NAME connection show 2>/dev/null |
 		awk -F: '$1 == "gsm" { print $2; exit }'
 }
-recover() {
+recover() {	# recover <level>: 1 redial, 2 ModemManager restart, 3 modem restart
 	con="$(gsm_con)"
 	[ -n "$con" ] || return
-	logger -t diting-modem-redial "recovering: restarting ModemManager"
-	systemctl restart ModemManager
+	level="${1:-2}"
+	case "$level" in
+	3)	modem_rproc=""
+		for r in /sys/class/remoteproc/remoteproc*/name; do
+			grep -q modem "$r" 2>/dev/null && modem_rproc="${r%/name}"
+		done
+		if [ -n "$modem_rproc" ] && [ -w "$modem_rproc/state" ]; then
+			logger -t diting-modem-redial "recovering: restarting the modem firmware"
+			echo stop > "$modem_rproc/state" 2>/dev/null
+			sleep 5
+			echo start > "$modem_rproc/state" 2>/dev/null
+			sleep 10
+		fi
+		systemctl restart ModemManager
+		;;
+	2)	logger -t diting-modem-redial "recovering: restarting ModemManager"
+		systemctl restart ModemManager
+		;;
+	*)	;;
+	esac
 	i=0
 	while [ "$i" -lt 30 ]; do
 		mmcli -m 0 2>/dev/null | grep -qE "state:.*(registered|connected)" && break
@@ -32,7 +51,7 @@ while :; do
 	case "$state" in
 	*connecting*)
 		stuck=$((stuck + 1)); down=0; dead=0
-		[ "$stuck" -ge 3 ] && { stuck=0; recover; }
+		[ "$stuck" -ge 3 ] && { stuck=0; recover 2; }
 		;;
 	*disconnected*)
 		down=$((down + 1)); stuck=0; dead=0
@@ -46,10 +65,15 @@ while :; do
 		stuck=0; down=0
 		if ip link show "$IFACE" >/dev/null 2>&1 &&
 			ping -c 1 -W 2 -I "$IFACE" "$PROBE" >/dev/null 2>&1; then
-			dead=0
+			dead=0; deaths=0
 		else
 			dead=$((dead + 1))
-			[ "$dead" -ge 3 ] && { dead=0; recover; }
+			if [ "$dead" -ge 3 ]; then
+				dead=0; deaths=$((deaths + 1))
+				# first dead bearer: restart ModemManager; if it dies again,
+				# restart the modem firmware itself
+				if [ "$deaths" -ge 2 ]; then recover 3; else recover 2; fi
+			fi
 		fi
 		;;
 	*)
