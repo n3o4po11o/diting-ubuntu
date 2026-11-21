@@ -11,6 +11,7 @@ stuck=0
 down=0
 dead=0
 deaths=0
+missing=0
 gsm_con() {
 	nmcli -t -f TYPE,NAME connection show 2>/dev/null |
 		awk -F: '$1 == "gsm" { print $2; exit }'
@@ -76,8 +77,18 @@ while :; do
 			fi
 		fi
 		;;
+	"")
+		# modem gone: ModemManager's re-scan after a resume may not find
+		# the QRTR modem again; a restart brings it back
+		missing=$((missing + 1))
+		if [ "$missing" -ge 2 ]; then
+			missing=0
+			logger -t diting-modem-redial "modem gone; restarting ModemManager"
+			systemctl restart ModemManager
+		fi
+		;;
 	*)
-		stuck=0; down=0; dead=0
+		stuck=0; down=0; dead=0; missing=0
 		;;
 	esac
 done
