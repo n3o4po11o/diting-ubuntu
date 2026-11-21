@@ -1,3 +1,15 @@
+diting-firmware-setup (0.1.2) resolute; urgency=medium
+
+  * CN ROM compatibility: persist/audio (factory speaker calibration)
+    is optional now. CN persist, and any persist reflashed from a
+    fastboot ROM image, has none; diting-speaker-protection then stays
+    on the plain ASP path instead of the build failing.
+  * Camera modules: also convert the Samsung S5KHM6 wide module of CN
+    units (no mainline driver yet; the camregs is ready for when one
+    lands).
+
+ -- ubuntu-diting local build <ubuntu-diting@localhost>  Fri, 21 Nov 2026 10:40:00 +0000
+
 diting-firmware-setup (0.1.1) resolute; urgency=medium
 
   * Ship ath11k-board2.py: the Wi-Fi board data becomes an ath11k

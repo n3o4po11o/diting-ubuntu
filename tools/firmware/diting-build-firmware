@@ -101,15 +101,20 @@ SHARE_TREES=(
 	# CDSP process shells (fastrpc_shell_3, fastrpc_shell_unsigned_3) and the
 	# vendor's CDSP libraries, for FastRPC clients (DSP_LIBRARY_PATH)
 	"vendor_dsp.tar:vendor/dsp/cdsp:usr/share/qcom/sm8475/Xiaomi/diting/dsp/cdsp"
-	# factory speaker calibration of this unit (CS35L41 protection firmware,
-	# calibrated resistance per amplifier), see diting-speaker-protection
-	"mnt_vendor_persist.tar:mnt/vendor/persist/audio:usr/share/qcom/sm8475/Xiaomi/diting/audio"
 	# Sensors, served to the SLPI by hexagonrpcd (-R /usr/share/qcom/sm8475/Xiaomi/diting):
 	# its dynamic modules, the sensor configuration and the factory
 	# sensor registry (calibration); see diting-sensors.service
 	"vendor_dsp.tar:vendor/dsp/sdsp:usr/share/qcom/sm8475/Xiaomi/diting/dsp/sdsp"
 	"vendor_etc.tar:vendor/etc/sensors/config:usr/share/qcom/sm8475/Xiaomi/diting/sensors/config"
 	"mnt_vendor_persist.tar:mnt/vendor/persist/sensors/registry/registry:usr/share/qcom/sm8475/Xiaomi/diting/sensors/registry.factory"
+)
+# Trees that this unit or ROM may not have: skipped with a warning
+OPT_TREES=(
+	# factory speaker calibration of this unit (CS35L41 protection
+	# firmware, calibrated resistance per amplifier); without it
+	# diting-speaker-protection stays on the plain ASP path. CN persist
+	# (and any persist reflashed from a fastboot ROM image) has none.
+	"mnt_vendor_persist.tar:mnt/vendor/persist/audio:usr/share/qcom/sm8475/Xiaomi/diting/audio"
 )
 # Single files outside /usr/lib/firmware: <tar>:<file in tar>:<target from />
 SHARE_FILES=(
@@ -133,6 +138,9 @@ SHARE_LINKS=(
 CAMREGS=(
 	"com.qti.sensormodule.diting_sunny_s5k4h7_ultra.bin:s5k4h7-ultra.camregs"
 	"com.qti.sensormodule.diting_semco_s5khp1_wide.bin:s5khp1-wide.camregs"
+	# CN units carry a Samsung S5KHM6 wide module instead of the S5KHP1
+	# (no mainline driver yet; the camregs is ready for when one lands)
+	"com.qti.sensormodule.diting_sunny_s5khm6_wide.bin:s5khm6-wide.camregs"
 )
 
 work="$(mktemp -d)"
@@ -157,6 +165,23 @@ fetch() {
 	fi
 }
 source_of() { if [ -n "$FW_TREE" ]; then echo "$2"; else echo "$1:$2"; fi; }
+have() {	# have <tarball> <path>: whether the source tree/tar has it
+	if [ -n "$FW_TREE" ]; then
+		# shellcheck disable=SC2086 # the pattern is a glob on purpose
+		(cd "$FW_TREE" && shopt -s nullglob && set -- $2 && [ $# -gt 0 ])
+	else
+		tar -tf "$FW_SRC/$1" --wildcards "$2" 2>/dev/null | grep -q .
+	fi
+}
+copy_tree() {	# copy_tree <tarball> <dir> <target>
+	fresh_tmp
+	fetch "$1" "$2"
+	(cd "$tmp/$2" && find . -type f) | while read -r f; do
+		mkdir -p "$(dirname "$bld/$3/${f#./}")"
+		cp "$tmp/$2/$f" "$bld/$3/${f#./}"
+		echo "$3/${f#./} $(sha256_of "$bld/$3/${f#./}") $(source_of "$1" "$2/${f#./}")" >> "$manifest"
+	done
+}
 add() {	# add <file> <target> <source description>
 	mkdir -p "$(dirname "$bld/$FW/$2")"
 	cp "$1" "$bld/$FW/$2"
@@ -210,13 +235,15 @@ for b in "${TREES[@]}"; do
 done
 for b in "${SHARE_TREES[@]}"; do
 	IFS=: read -r tarball dir target <<<"$b"
-	fresh_tmp
-	fetch "$tarball" "$dir"
-	(cd "$tmp/$dir" && find . -type f | LC_ALL=C sort) | while read -r f; do
-		mkdir -p "$(dirname "$bld/$target/${f#./}")"
-		cp "$tmp/$dir/$f" "$bld/$target/${f#./}"
-		echo "$target/${f#./} $(sha256_of "$bld/$target/${f#./}") $(source_of "$tarball" "$dir/${f#./}")" >> "$manifest"
-	done
+	copy_tree "$tarball" "$dir" "$target"
+done
+for b in "${OPT_TREES[@]}"; do
+	IFS=: read -r tarball dir target <<<"$b"
+	if have "$tarball" "$dir"; then
+		copy_tree "$tarball" "$dir" "$target"
+	else
+		warn "no $dir: skipping $target"
+	fi
 done
 for b in "${SHARE_FILES[@]}"; do
 	IFS=: read -r tarball member target <<<"$b"
