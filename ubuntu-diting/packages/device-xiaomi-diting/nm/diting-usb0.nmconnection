@@ -11,6 +11,9 @@ autoconnect-priority=10
 [ipv4]
 method=manual
 address1=172.16.42.1/24,172.16.42.2
+# Lose against the cellular default route (gsm: 20700): a host that does
+# not NAT would otherwise black-hole the phone's internet while plugged in.
+route-metric=30000
 dns=1.1.1.1;9.9.9.9;
 
 [ipv6]
