@@ -11,7 +11,7 @@
 . "$(dirname "$0")/lib-buildd.sh"
 
 MM_VERSION="${MODEMMANAGER_VERSION:-1.25.95-1ubuntu1}"
-LOCAL_SUFFIX="diting1"
+LOCAL_SUFFIX="diting2"
 PKG="$UD/packages/modemmanager"
 
 buildd_setup

@@ -1,0 +1,39 @@
+Keep the modem across suspend: quick hooks as the default
+
+Every modem in this build is integrated in the SoC and stays powered and
+registered while the system sleeps. The default suspend path removes the
+modem objects and re-scans on resume, and that re-probe loses the
+QRTR (qcom-soc) modem about one suspend in six - "couldn't check support
+for device qcom-soc" - because the plugin's support check races the
+teardown of the previous object. The modem then stays gone until
+ModemManager is restarted.
+
+Use the existing quick suspend/resume hooks as the default for this
+build: on suspend, switch the modem to terse mode (calls and texts
+only); on resume, sync the state. No object teardown, no re-scan, no
+race. This is what the --test-quick-suspend-resume option does, without
+involving the test option machinery.
+---
+ src/main.c |   11 +++++++----
+ 1 file changed, 7 insertions(+), 4 deletions(-)
+
+--- a/src/main.c
++++ b/src/main.c
+@@ -251,9 +251,14 @@
+             g_signal_connect (sleep_monitor, MM_SLEEP_MONITOR_RESUMING, G_CALLBACK (resuming_quick_cb), NULL);
+         } else {
+-            mm_dbg ("Full suspend/resume hooks enabled");
++            /* All modems in this build are integrated in the SoC and
++             * survive suspend; the full remove/re-scan path loses the
++             * QRTR modem on the re-probe about one suspend in six.
++             * Keep the objects: terse mode on sleep, state sync on
++             * resume (the --test-quick-suspend-resume behavior). */
++            mm_dbg ("Quick suspend/resume hooks enabled (build default)");
+             sleep_monitor = mm_sleep_monitor_get ();
+-            g_signal_connect (sleep_monitor, MM_SLEEP_MONITOR_SLEEPING, G_CALLBACK (sleeping_cb), NULL);
+-            g_signal_connect (sleep_monitor, MM_SLEEP_MONITOR_RESUMING, G_CALLBACK (resuming_cb), NULL);
++            g_signal_connect (sleep_monitor, MM_SLEEP_MONITOR_SLEEPING, G_CALLBACK (sleeping_quick_cb), NULL);
++            g_signal_connect (sleep_monitor, MM_SLEEP_MONITOR_RESUMING, G_CALLBACK (resuming_quick_cb), NULL);
+         }
+     }
+ #endif
