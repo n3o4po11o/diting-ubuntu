@@ -34,6 +34,7 @@ throttling), worked out 2026-11-21/22. Fixes are commits on the
 | Rootfs "clean with errors", growfs blocked | `rw` on the cmdline skips systemd-fsck-root; unclean poweroffs accumulated damage | boot `ro`; fsck runs when the fs carries errors (also the failed-boot pitfall: an fsck that cannot repair drops into emergency with no shell - repair from the initramfs debug shell, see runbook) |
 | UFS bad blocks (EIO on reads) | storage-level, visible as e2fsck I/O errors | full reflash of userdata (fresh ext4, FTL remaps); monitor dmesg |
 | arm32 binaries ENOEXEC | SM8475 is asymmetric: only the 3x A710 have AArch32 EL0; kernel gates support behind a cmdline param | `allow_mismatched_32bit_el0` on the cmdline (native arm32 on the A710 cluster) |
+| Modem unstable across the day | MM's suspend handling drops the QRTR modem and the re-scan fails (~1 suspend in 6); watchdog noticed only minutes later | `diting-mm-resume.service`: on every resume, restart MM immediately when `mmcli` sees no modem (0.7.29) |
 | No USB host mode | bring-up DT pinned `dr_mode = "peripheral"`, no role-switch wiring | patch 0098 (r51): otg + usb-role-switch + pmic_glink connector graph; NM ethernet management (0.7.27, docs/OTG.md) |
 
 ## Hardware facts (measured, do not re-litigate)
