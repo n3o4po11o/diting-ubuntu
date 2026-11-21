@@ -323,3 +323,14 @@ Workaround (shipped as a note, not packaged): disable idle blanking —
     gsettings set org.gnome.desktop.screensaver idle-activation-enabled false
 
 A proper fix needs panel/driver work on the dim path (patch 0015 territory).
+
+## The AP cannot write the PMK8350 RTC on this device (2026-11-21)
+
+The SPMI PMIC arbiter rejects every AP write to the RTC registers
+("disallowed SPMI write to sid=0, addr=0x61xx"): allow-set-time makes
+rtc_set_time reachable, and the kernel's NTP sync_hw_clock worker then
+retries the rejected write ~47 times per second, forever (12k+ denied
+writes per boot). The RTC is read-only for the AP - the Rubik Pi 3
+precedent does not transfer. Keep the RTC read-only (patch 0028 as
+upstream); time persistence is systemd's timesync clock file plus NTP
+after any unclean poweroff.

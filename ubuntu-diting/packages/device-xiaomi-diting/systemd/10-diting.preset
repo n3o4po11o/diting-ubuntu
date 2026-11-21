@@ -16,5 +16,4 @@ enable diting-wifi-band-steer.service
 # steals the QRTR service port from rmtfs.service and crashes the modem
 # (EFS rmts_get_buffer fails); the mask in this package wins either way.
 disable rmtfs-dir.service
-enable diting-rtc-sync.service
 enable diting-modem-redial.service
