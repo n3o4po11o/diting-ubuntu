@@ -203,9 +203,10 @@ done
 # Wi-Fi board data (INFERRED: hwc "GL" + project "l12" -> bd_l12gl.elf) with
 # this phone's MAC address, as a board-2.bin in updates/ (ahead of Ubuntu's,
 # whose generic board-id-255 entry is another design's RF configuration: no
-# 5 GHz). Entries: the calibration variant of the DT and the chip-id fallback
-# (for a DT without the variant). Needs kernel r42, which loads the Wi-Fi
-# firmware above (Ubuntu's default HSP.1.1 LITE firmware rejects this data).
+# 5 GHz). Entries: the calibration variant of the DT and chip-id fallbacks
+# (units report qmi-chip-id 2 or 18, chip_id 0x2/0x12) down to a chip-id
+# agnostic one. Needs kernel r42, which loads the Wi-Fi firmware above
+# (Ubuntu's default HSP.1.1 LITE firmware rejects this data).
 BDF=vendor/firmware_mnt/image/qca6490/bd_l12gl.elf
 WLAN_MAC=mnt/vendor/persist/qca6490/wlan_mac.bin
 fresh_tmp
@@ -215,7 +216,11 @@ if (fetch mnt_vendor_persist.tar "$WLAN_MAC") 2>/dev/null; then
 	mkdir -p "$(dirname "$bld/$FW/$board2")"
 	python3 -I -B "$DITING_TOOLS/ath11k-board2.py" --mac-file "$tmp/$WLAN_MAC" "$tmp/$BDF" "$bld/$FW/$board2" \
 		"bus=pci,vendor=17cb,device=1103,subsystem-vendor=17cb,subsystem-device=0108,qmi-chip-id=2,qmi-board-id=255,variant=Xiaomi_diting" \
-		"bus=pci,qmi-chip-id=2" || die "building $board2 failed"
+		"bus=pci,qmi-chip-id=2" \
+		"bus=pci,vendor=17cb,device=1103,subsystem-vendor=17cb,subsystem-device=0108,qmi-chip-id=18,qmi-board-id=255,variant=Xiaomi_diting" \
+		"bus=pci,qmi-chip-id=18" \
+		"bus=pci,vendor=17cb,device=1103" \
+		"bus=pci" || die "building $board2 failed"
 	echo "$FW/$board2 $(sha256_of "$bld/$FW/$board2") $(source_of vendor_firmware_mnt.tar "$BDF") + $(source_of mnt_vendor_persist.tar "$WLAN_MAC") (ath11k-board2.py)" >> "$manifest"
 else
 	warn "no $WLAN_MAC: Wi-Fi keeps the generic board data (no 5 GHz)"

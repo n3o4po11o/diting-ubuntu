@@ -51,3 +51,4 @@ src/diting-resuspend usr/libexec/diting
 systemd/diting-resuspend.service usr/lib/systemd/system
 system-sleep/diting-resuspend usr/lib/systemd/system-sleep
 fastrpc/xiaomi-diting.yaml usr/share/qcom/conf.d
+mask/etc/systemd/system/rmtfs-dir.service etc/systemd/system

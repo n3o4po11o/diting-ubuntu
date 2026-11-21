@@ -12,3 +12,7 @@ enable diting-modem-setup.service
 enable diting-voice-call.service
 enable diting-speaker-protection.service
 enable diting-wifi-band-steer.service
+# Ubuntu rmtfs 1.1.1-2 enables rmtfs-dir (storage in /var/lib/rmtfs), which
+# steals the QRTR service port from rmtfs.service and crashes the modem
+# (EFS rmts_get_buffer fails); the mask in this package wins either way.
+disable rmtfs-dir.service
