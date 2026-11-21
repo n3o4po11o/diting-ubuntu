@@ -167,8 +167,10 @@ fetch() {
 source_of() { if [ -n "$FW_TREE" ]; then echo "$2"; else echo "$1:$2"; fi; }
 have() {	# have <tarball> <path>: whether the source tree/tar has it
 	if [ -n "$FW_TREE" ]; then
+		local p
 		# shellcheck disable=SC2086 # the pattern is a glob on purpose
-		(cd "$FW_TREE" && shopt -s nullglob && set -- $2 && [ $# -gt 0 ])
+		for p in $2; do [ -e "$FW_TREE/$p" ] && return 0; done
+		return 1
 	else
 		tar -tf "$FW_SRC/$1" --wildcards "$2" 2>/dev/null | grep -q .
 	fi
