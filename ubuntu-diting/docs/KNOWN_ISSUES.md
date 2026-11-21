@@ -308,3 +308,18 @@ on the test phone now sets 10 s (applies only after systemd-sysctl).
   `nothp` (BUILD.md).
 - CoreSight/QDSS nodes inherited from `sm8450.dtsi` stay blacklisted
   (`/etc/modprobe.d/diting-bringup.conf`).
+
+## CN units: display pipeline wedges on the idle dim (2026-11-21)
+
+On a CN unit (OS3.0.3.0.VLFCNXM firmware) every idle dim froze the UI and
+blacked the screen: the DSI brightness write (DCS 0x51) times out
+(`dsi_cmds2buf_tx: cmd dma tx failed`), after which DPU commits never
+finish (`wait for commit done returned -22/-110`, `ctl start interrupt
+wait failed`, ~450 errors per wedge) and the panel does not come back
+until reboot. The EEA unit of the original author does not show this.
+Workaround (shipped as a note, not packaged): disable idle blanking —
+
+    gsettings set org.gnome.desktop.session idle-delay 0
+    gsettings set org.gnome.desktop.screensaver idle-activation-enabled false
+
+A proper fix needs panel/driver work on the dim path (patch 0015 territory).
