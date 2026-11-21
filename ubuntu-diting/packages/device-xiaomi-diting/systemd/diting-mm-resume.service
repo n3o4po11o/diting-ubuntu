@@ -1,0 +1,14 @@
+[Unit]
+Description=Recover ModemManager after resume if it lost the QRTR modem
+# MM's suspend handling removes the modem and the re-scan does not find
+# the qcom-soc device again (upstream QRTR re-enumeration gap): about
+# one in six suspends leaves the phone without a modem until something
+# restarts MM. Check on every resume; restart only when it is gone.
+After=suspend.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'mmcli -L 2>/dev/null | grep -q Modem/ || systemctl restart ModemManager'
+
+[Install]
+WantedBy=suspend.target
