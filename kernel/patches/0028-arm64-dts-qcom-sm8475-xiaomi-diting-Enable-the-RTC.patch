@@ -9,14 +9,14 @@ battery-backed PMIC RTC itself has to carry the time across reboots.
 diting-rtc-sync writes it once NTP has synchronized (as on the Rubik Pi 3,
 same PMK8350).
 ---
- arch/arm64/boot/dts/qcom/sm8475-xiaomi-diting.dts | 7 +++++++
- 1 file changed, 7 insertions(+)
+ arch/arm64/boot/dts/qcom/sm8475-xiaomi-diting.dts | 8 ++++++++
+ 1 file changed, 8 insertions(+)
 
 diff --git a/arch/arm64/boot/dts/qcom/sm8475-xiaomi-diting.dts b/arch/arm64/boot/dts/qcom/sm8475-xiaomi-diting.dts
 index 5fee1ea04..5c936cd0d 100644
 --- a/arch/arm64/boot/dts/qcom/sm8475-xiaomi-diting.dts
 +++ b/arch/arm64/boot/dts/qcom/sm8475-xiaomi-diting.dts
-@@ -686,6 +686,13 @@ platform {
+@@ -686,6 +686,14 @@ platform {
  	};
  };
  
