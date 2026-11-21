@@ -1,0 +1,13 @@
+[Unit]
+Description=Write the synchronized clock into the PMIC RTC
+Documentation=man:systemd.time(7)
+After=time-sync.target
+Wants=time-sync.target
+ConditionPathExists=/dev/rtc0
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/diting/diting-rtc-sync
+
+[Install]
+WantedBy=time-sync.target
