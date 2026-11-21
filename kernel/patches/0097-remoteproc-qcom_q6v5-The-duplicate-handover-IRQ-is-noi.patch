@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: royka1 <397414+royka1@users.noreply.github.com>
+Date: Sat, 21 Nov 2026 10:45:00 +0000
+Subject: [PATCH 97/97] remoteproc: qcom_q6v5: the duplicate handover IRQ is noise
+
+The CDSP firmware of the CN diting units signals the handover doorbell
+repeatedly after boot; every duplicate prints an error (rate limited,
+but still hundreds per boot). The handler ignores the duplicates
+anyway - log them at debug level.
+---
+ drivers/remoteproc/qcom_q6v5.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/remoteproc/qcom_q6v5.c b/drivers/remoteproc/qcom_q6v5.c
+index 000000000..000000001 100644
+--- a/drivers/remoteproc/qcom_q6v5.c
++++ b/drivers/remoteproc/qcom_q6v5.c
+@@ -165,7 +165,7 @@ static irqreturn_t q6v5_handover_interrupt(int irq, void *data)
+ 	struct qcom_q6v5 *q6v5 = data;
+ 
+ 	if (q6v5->handover_issued) {
+-		dev_err_ratelimited(q6v5->dev, "Handover signaled, but it already happened\n");
++		dev_dbg_ratelimited(q6v5->dev, "handover signaled again (ignored)\n");
+ 		return IRQ_HANDLED;
+ 	}
+ 
