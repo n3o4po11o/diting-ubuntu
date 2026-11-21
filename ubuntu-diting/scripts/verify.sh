@@ -28,10 +28,7 @@ if [ -f "$img" ]; then
 		t "linux-image deb has /lib/modules/$KERNEL_RELEASE" grep -q "lib/modules/$KERNEL_RELEASE/kernel/" <<<"$c"
 		t "linux-image deb has modules from one release only" test "$(grep -o 'lib/modules/[^/]*/' <<<"$c" | sort -u | wc -l)" = 1
 		t "linux-image deb ships the Diting DTB" grep -q "linux-image-$KERNEL_RELEASE/$KERNEL_DTB" <<<"$c"
-		t "linux-image deb ships config and System.map" sh -c "grep -q 'boot/config-$KERNEL_RELEASE' <<'X'
-$c
-X
-"
+		t "linux-image deb ships config and System.map" grep -q "boot/config-$KERNEL_RELEASE" <<<"$c"
 		t "built-in UFS QCOM driver" grep -qx 'CONFIG_SCSI_UFS_QCOM=y' "$OUT/kernel/config-$KERNEL_RELEASE"
 	else bad "linux-image-$KERNEL_RELEASE deb missing"; fi
 else skip "kernel not built"; fi
@@ -53,25 +50,23 @@ else skip "device package not built"; fi
 
 echo "== rootfs"
 rimg="$OUT/ubuntu-diting-rootfs-$UBUNTU_SUITE-arm64.img"
+# prefer the public image: it is the artifact that gets flashed
+[ -f "${rimg%.img}-public.img" ] && rimg="${rimg%.img}-public.img"
 if [ -f "$rimg" ]; then
 	rd() { debugfs -R "cat $1" "$rimg" 2>/dev/null; }
-	osr="$(rd /etc/os-release)"
+	# debugfs does not follow symlinks, and /etc/os-release is one
+	osr="$(rd /usr/lib/os-release)"
 	t "os-release ID=ubuntu" grep -qx 'ID=ubuntu' <<<"$osr"
 	t "os-release VERSION_CODENAME=$UBUNTU_SUITE" grep -qx "VERSION_CODENAME=$UBUNTU_SUITE" <<<"$osr"
 	t "os-release VERSION_ID=$UBUNTU_VERSION_ID" grep -qx "VERSION_ID=\"$UBUNTU_VERSION_ID\"" <<<"$osr"
 	st="$(rd /var/lib/dpkg/status)"
-	t "dpkg architecture arm64 (dpkg itself)" sh -c "printf '%s\n' \"\$1\" | grep -A8 '^Package: dpkg$' | grep -qx 'Architecture: arm64'" _ "$st"
+	dpkg_arch="$(awk '/^Package: dpkg$/{f=1;next} f&&/^Package:/{f=0} f&&/^Architecture:/{print;exit}' <<<"$st")"
+	t "dpkg architecture arm64 (dpkg itself)" test "$dpkg_arch" = "Architecture: arm64"
 	t "systemd-sysv installed (systemd is init)" grep -qx 'Package: systemd-sysv' <<<"$st"
 	t "local linux-image-$KERNEL_RELEASE installed" grep -qx "Package: linux-image-$KERNEL_RELEASE" <<<"$st"
 	t "device-xiaomi-diting installed" grep -qx 'Package: device-xiaomi-diting' <<<"$st"
-	t "no generic Ubuntu kernel installed" sh -c "! grep -q '^Package: linux-image-.*-generic' <<'X'
-$st
-X
-"
-	t "no apk/OpenRC in rootfs" sh -c "! grep -qE '^Package: (apk-tools|openrc)$' <<'X'
-$st
-X
-"
+	t "no generic Ubuntu kernel installed" sh -c '! grep -q "^Package: linux-image-.*-generic"' <<<"$st"
+	t "no apk/OpenRC in rootfs" sh -c '! grep -qE "^Package: (apk-tools|openrc)$"' <<<"$st"
 	t "apt sources signed official ports archive" sh -c "debugfs -R 'cat /etc/apt/sources.list.d/ubuntu.sources' '$rimg' 2>/dev/null | grep -q 'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg'"
 	t "initramfs for $KERNEL_RELEASE present" sh -c "debugfs -R 'stat /boot/initrd.img-$KERNEL_RELEASE' '$rimg' 2>&1 | grep -q 'Type: regular'"
 	t "modules.dep for $KERNEL_RELEASE present" sh -c "debugfs -R 'stat /usr/lib/modules/$KERNEL_RELEASE/modules.dep' '$rimg' 2>&1 | grep -q 'Type: regular'"
