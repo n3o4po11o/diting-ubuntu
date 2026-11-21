@@ -334,3 +334,31 @@ writes per boot). The RTC is read-only for the AP - the Rubik Pi 3
 precedent does not transfer. Keep the RTC read-only (patch 0028 as
 upstream); time persistence is systemd's timesync clock file plus NTP
 after any unclean poweroff.
+
+## CN units: no audio - the ADSP's SPF never answers (2026-11-21, open)
+
+On the CN unit (OS3.3.3.0.VLFCNXM-extracted firmware) there is no sound at
+all: every playback open fails and WirePlumber only creates a dummy sink.
+
+    qcom-apm gprsvc:service:2:1: CMD timeout for [1001021] opcode
+
+0x01001021 is APM_CMD_GET_SPF_STATE: at boot (13 s, before any audio
+service) the q6apm driver's probe handshake with the ADSP's audio
+framework times out, and a manual re-bind of the APM device first logs
+"GPR: Port(1) is not registered" - the CN ADSP firmware's SPF never
+registers its GPR port with the kernel. Every graph operation then fails
+(FE opens return EINVAL, the ALSA card exposes no profiles).
+
+Excluded with evidence: the CN voice topology (same timeout with the
+plain device-package topology), missing components (cs35l41 x2 with DSP
+firmware, wcd938x, all four lpass macros probe), the 1972 boot clock
+(same timeout after a time-correct ADSP restart), the persist speaker
+calibration (present on the real unit, protection DSP runs with
+calibrated R), failed services (none) and userspace holders (none).
+
+Next steps when picking this up:
+- Establish whether audio ever worked on any CN boot (bisects a kernel
+  regression against a firmware difference; the r46->r50 patches are
+  log-level only and the config sweep touches nothing audio-related).
+- Decisive test: extract the EEA firmware_mnt's adsp image from an EEA
+  fastboot ROM and run it with the CN extraction for everything else.
