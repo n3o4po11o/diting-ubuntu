@@ -1,43 +1,59 @@
 #!/bin/sh
 # Keep the cellular connection up. After boot the modem needs ~50 s to
 # register; a NetworkManager activation that starts too early can hang in
-# "connecting (prepare)" forever (with QMI InvalidHandle noise), and
-# autoconnect can give up after its retries. Watch the gsm device and
-# recover: restart ModemManager when stuck, redial when down.
+# "connecting (prepare)" forever (QMI InvalidHandle noise), autoconnect
+# gives up after its retries, and after a mid-session disconnect a fresh
+# bearer can come up dead (connected, no packets; only a ModemManager
+# restart recovers it). Watch the gsm device and recover.
+PROBE=223.5.5.5          # China Telecom anycast DNS; ICMP, no DNS needed
+IFACE=qmapmux0.0         # gsm data interface of this device
 stuck=0
 down=0
+dead=0
 gsm_con() {
 	nmcli -t -f TYPE,NAME connection show 2>/dev/null |
 		awk -F: '$1 == "gsm" { print $2; exit }'
+}
+recover() {
+	con="$(gsm_con)"
+	[ -n "$con" ] || return
+	logger -t diting-modem-redial "recovering: restarting ModemManager"
+	systemctl restart ModemManager
+	i=0
+	while [ "$i" -lt 30 ]; do
+		mmcli -m 0 2>/dev/null | grep -qE "state:.*(registered|connected)" && break
+		i=$((i + 1)); sleep 5
+	done
+	nmcli connection up "$con" >/dev/null 2>&1 || true
 }
 while :; do
 	sleep 60
 	state=$(nmcli -t -f GENERAL.STATE device show qrtr0 2>/dev/null)
 	case "$state" in
 	*connecting*)
-		stuck=$((stuck + 1)); down=0
-		[ "$stuck" -lt 3 ] && continue
-		stuck=0
-		con="$(gsm_con)"
-		[ -n "$con" ] || continue
-		logger -t diting-modem-redial "qrtr0 stuck connecting; restarting ModemManager"
-		systemctl restart ModemManager
-		i=0
-		while [ "$i" -lt 30 ]; do
-			mmcli -m 0 2>/dev/null | grep -qE "state:.*(registered|connected)" && break
-			i=$((i + 1)); sleep 5
-		done
-		nmcli connection up "$con" >/dev/null 2>&1 || true
+		stuck=$((stuck + 1)); down=0; dead=0
+		[ "$stuck" -ge 3 ] && { stuck=0; recover; }
 		;;
 	*disconnected*)
-		down=$((down + 1)); stuck=0
-		[ "$down" -lt 2 ] && continue
-		down=0
-		con="$(gsm_con)"
-		[ -n "$con" ] && nmcli connection up "$con" >/dev/null 2>&1
+		down=$((down + 1)); stuck=0; dead=0
+		if [ "$down" -ge 2 ]; then
+			down=0
+			con="$(gsm_con)"
+			[ -n "$con" ] && nmcli connection up "$con" >/dev/null 2>&1
+		fi
+		;;
+	*connected*)
+		stuck=0; down=0
+		if ip link show "$IFACE" >/dev/null 2>&1 &&
+			ping -c 1 -W 2 -I "$IFACE" "$PROBE" >/dev/null 2>&1; then
+			dead=0
+		else
+			dead=$((dead + 1))
+			[ "$dead" -ge 3 ] && { dead=0; recover; }
+		fi
 		;;
 	*)
-		stuck=0; down=0
+		stuck=0; down=0; dead=0
 		;;
 	esac
 done
