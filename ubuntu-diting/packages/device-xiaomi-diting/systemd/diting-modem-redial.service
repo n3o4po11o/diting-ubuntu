@@ -1,0 +1,13 @@
+[Unit]
+Description=Keep the cellular connection up (redial after hangs)
+After=NetworkManager.service ModemManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/diting/diting-modem-redial
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

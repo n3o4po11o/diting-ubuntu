@@ -1,0 +1,43 @@
+#!/bin/sh
+# Keep the cellular connection up. After boot the modem needs ~50 s to
+# register; a NetworkManager activation that starts too early can hang in
+# "connecting (prepare)" forever (with QMI InvalidHandle noise), and
+# autoconnect can give up after its retries. Watch the gsm device and
+# recover: restart ModemManager when stuck, redial when down.
+stuck=0
+down=0
+gsm_con() {
+	nmcli -t -f TYPE,NAME connection show 2>/dev/null |
+		awk -F: '$1 == "gsm" { print $2; exit }'
+}
+while :; do
+	sleep 60
+	state=$(nmcli -t -f GENERAL.STATE device show qrtr0 2>/dev/null)
+	case "$state" in
+	*connecting*)
+		stuck=$((stuck + 1)); down=0
+		[ "$stuck" -lt 3 ] && continue
+		stuck=0
+		con="$(gsm_con)"
+		[ -n "$con" ] || continue
+		logger -t diting-modem-redial "qrtr0 stuck connecting; restarting ModemManager"
+		systemctl restart ModemManager
+		i=0
+		while [ "$i" -lt 30 ]; do
+			mmcli -m 0 2>/dev/null | grep -qE "state:.*(registered|connected)" && break
+			i=$((i + 1)); sleep 5
+		done
+		nmcli connection up "$con" >/dev/null 2>&1 || true
+		;;
+	*disconnected*)
+		down=$((down + 1)); stuck=0
+		[ "$down" -lt 2 ] && continue
+		down=0
+		con="$(gsm_con)"
+		[ -n "$con" ] && nmcli connection up "$con" >/dev/null 2>&1
+		;;
+	*)
+		stuck=0; down=0
+		;;
+	esac
+done
