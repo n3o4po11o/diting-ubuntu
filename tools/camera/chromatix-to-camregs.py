@@ -48,8 +48,13 @@ for nid, name, kind, off, size in nodes.list:
         if label:
             entries = []
             for slave, addr, data, at, dt, op, delay in nodes.decode(off, size):
-                # op 0: write, op 2: sequential (burst) write
-                if op not in (0, 2) or at != 2 or dt not in (1, 2) or slave is not None:
+                # op 0: write, op 2: sequential (burst) write, op 3: read
+                # (skipped), op 4: write + poll-wait: keep the write and its
+                # delay; the poll itself cannot be expressed in camregs
+                # (e.g. the S5KHM6 reset: 0x05=0xff, wait 40 ms)
+                if op == 3:
+                    continue
+                if op not in (0, 2, 4) or at != 2 or dt not in (1, 2) or slave is not None:
                     sys.exit(f'{label}: unsupported write at 0x{addr:04x} '
                              f'(op={op} at={at} dt={dt} slave={slave})')
                 if len(data) > 1:               # burst: consecutive registers

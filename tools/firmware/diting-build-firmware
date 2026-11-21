@@ -269,7 +269,7 @@ for c in "${CAMREGS[@]}"; do
 	fi
 	fresh_tmp
 	python3 -I -B "$DITING_TOOLS/camera/chromatix-to-camregs.py" "$CAM_SRC/$module" "$tmp/$out" >/dev/null ||
-		die "converting $module failed"
+		{ warn "converting $module failed: no $out (this camera stays off)"; continue; }
 	add "$tmp/$out" "$DIT/$out" "vendor:lib64/camera/$module (chromatix-to-camregs.py)"
 done
 
