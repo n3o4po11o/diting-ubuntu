@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: royka1 <397414+royka1@users.noreply.github.com>
+Date: Sat, 22 Nov 2026 10:00:00 +0000
+Subject: [PATCH 99/99] arm64: dts: qcom: sm8475-xiaomi-diting: Disable the S5KHP1 wide camera
+
+CN units carry a Samsung S5KHM6 wide camera, not the S5KHP1 of the
+original EEA unit. The s5khp1 driver probes, fails to load its register
+tables (no s5khp1-wide.camregs - the firmware extraction builds
+s5khm6-wide.camregs for the HM6 instead) and leaves an error in every
+boot log. Disable the node: the HM6 needs its own driver anyway.
+---
+ arch/arm64/boot/dts/qcom/sm8475-xiaomi-diting.dts | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/sm8475-xiaomi-diting.dts b/arch/arm64/boot/dts/qcom/sm8475-xiaomi-diting.dts
+index a1e2b3f4c..b2f3a4d5e 100644
+--- a/arch/arm64/boot/dts/qcom/sm8475-xiaomi-diting.dts
++++ b/arch/arm64/boot/dts/qcom/sm8475-xiaomi-diting.dts
+@@ -767,6 +767,7 @@
+ 	camera@10 {
+ 		compatible = "samsung,s5khp1";
+ 		reg = <0x10>;
++		status = "disabled";	/* CN units have the S5KHM6 instead */
+
+ 		clocks = <&camcc CAM_CC_MCLK2_CLK>;
+ 		assigned-clocks = <&camcc CAM_CC_MCLK2_CLK>;
