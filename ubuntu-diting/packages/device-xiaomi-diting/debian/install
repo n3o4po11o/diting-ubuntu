@@ -30,6 +30,9 @@ src/diting-voice-pcm usr/libexec/diting
 src/diting-voice-call usr/libexec/diting
 systemd/diting-voice-call.service usr/lib/systemd/system
 systemd/diting-audiopd.service usr/lib/systemd/system
+systemd/diting-rootpd.service usr/lib/systemd/system
+systemd/diting-audio-mixer.service usr/lib/systemd/system
+wireplumber/51-diting-alsa.conf etc/wireplumber/wireplumber.conf.d
 udev/90-diting-audiopd.rules usr/lib/udev/rules.d
 src/diting-callaudio usr/libexec/diting
 dbus/org.mobian_project.CallAudio.service usr/share/dbus-1/services

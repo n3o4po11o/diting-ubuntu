@@ -9,6 +9,13 @@ disable systemd-networkd-wait-online.service
 enable diting-usb-gadget.service
 enable diting-boot-successful.service
 enable diting-modem-setup.service
+# udev starts it too (90-diting-audiopd.rules); preset-enabling keeps the
+# ADSP log pump (adspmsgd, PD exception logging) running across ADSP
+# restarts that do not re-trigger udev
+enable diting-rootpd.service
+# DAPM bring-up for the speaker/mic paths before any session opens the
+# q6apm pcms (WirePlumber 0.5 runs no UCM EnableSequence)
+enable diting-audio-mixer.service
 enable diting-voice-call.service
 enable diting-speaker-protection.service
 enable diting-wifi-band-steer.service

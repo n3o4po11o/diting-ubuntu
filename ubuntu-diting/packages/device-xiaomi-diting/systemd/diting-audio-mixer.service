@@ -1,0 +1,36 @@
+[Unit]
+Description=Xiaomi Diting audio DAPM bring-up (speaker + mic paths)
+# The FE->BE DAPM paths and the WCD938x capture chain default to off, so
+# the q6apm pcms cannot be used until these switches are set (WirePlumber
+# 0.5 has no UCM verb path to run the EnableSequence). Speaker set =
+# UCM BootSequence + HiFi Speaker device; mic set = UCM Mic EnableSequence
+# (packages/device-xiaomi-diting/ucm is the source of truth).
+After=sound.target alsa-restore.service
+ConditionPathExists=/dev/snd/controlC0
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/amixer -c0 cset "name=TERTIARY_TDM_RX_0 Audio Mixer MultiMedia1" 1
+ExecStart=/usr/bin/amixer -c0 cset "name=Top MUX" Speaker
+ExecStart=/usr/bin/amixer -c0 cset "name=MultiMedia2 Mixer TX_CODEC_DMA_TX_3" 1
+ExecStart=/usr/bin/amixer -c0 cset "name=ADC1_MIXER Switch" 1
+ExecStart=/usr/bin/amixer -c0 cset "name=ADC1 Switch" 1
+ExecStart=/usr/bin/amixer -c0 cset "name=TX0 MODE" ADC_NORMAL
+ExecStart=/usr/bin/amixer -c0 cset "name=ADC1 Volume" 8
+ExecStart=/usr/bin/amixer -c0 cset "name=HDR34 MUX" NO_HDR34
+ExecStart=/usr/bin/amixer -c0 cset "name=ADC4 MUX" INP5
+ExecStart=/usr/bin/amixer -c0 cset "name=ADC4 Switch" 1
+ExecStart=/usr/bin/amixer -c0 cset "name=TX3 MODE" ADC_NORMAL
+ExecStart=/usr/bin/amixer -c0 cset "name=ADC4 Volume" 8
+ExecStart=/usr/bin/amixer -c0 cset "name=TX DEC0 MUX" SWR_MIC
+ExecStart=/usr/bin/amixer -c0 cset "name=TX SMIC MUX0" SWR_MIC0
+ExecStart=/usr/bin/amixer -c0 cset "name=TX_AIF1_CAP Mixer DEC0" 1
+ExecStart=/usr/bin/amixer -c0 cset "name=TX_DEC0 Volume" 84
+ExecStart=/usr/bin/amixer -c0 cset "name=TX DEC1 MUX" SWR_MIC
+ExecStart=/usr/bin/amixer -c0 cset "name=TX SMIC MUX1" SWR_MIC1
+ExecStart=/usr/bin/amixer -c0 cset "name=TX_AIF1_CAP Mixer DEC1" 1
+ExecStart=/usr/bin/amixer -c0 cset "name=TX_DEC1 Volume" 84
+
+[Install]
+WantedBy=sound.target

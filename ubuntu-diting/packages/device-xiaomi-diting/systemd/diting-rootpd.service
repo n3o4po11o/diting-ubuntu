@@ -1,0 +1,28 @@
+[Unit]
+Description=ADSP root PD (adsprpcd): ADSP logs and PD exception logging
+Documentation=https://github.com/qualcomm/fastrpc
+# Started by udev when the ADSP's FastRPC device appears, before the audio
+# PD daemon: attaching to the root PD starts adspmsgd, the pump for the
+# DSP's dprintf buffer (audio PD boot logs, fastrpc_uprocess errors and PD
+# exception dumps land in this unit's journal instead of going nowhere).
+# Without it the ADSP side is a blind spot when debugging the SPF timeout.
+After=dev-fastrpc\x2dadsp.device
+Before=diting-audiopd.service
+ConditionPathExists=/dev/fastrpc-adsp
+ConditionPathExists=/usr/sbin/adsprpcd
+
+[Service]
+Type=simple
+# libadsprpc allocates its shared buffers from /dev/dma_heap/system when it
+# can open it; those buffers are CPU-cached and the fastrpc driver does no
+# per-call cache maintenance on them, so the DSP's requests arrive corrupted
+# (same as diting-audiopd.service; without the heap libadsprpc falls back to
+# the fastrpc driver's own allocator).
+InaccessiblePaths=-/dev/dma_heap
+# Two arguments ("rootpd adsp"), not one: a single "rootpd" arg makes
+# dsprpcd.c take the non-domain path and open createstaticpd:rootpd
+# instead of attaching the root PD (attachguestos) — verified on-device:
+# only the two-arg form starts the adspmsgd/PD-exception log path.
+ExecStart=/usr/sbin/adsprpcd rootpd adsp
+Restart=on-failure
+RestartSec=5
