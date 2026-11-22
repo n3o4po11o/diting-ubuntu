@@ -132,7 +132,7 @@ modprobe.blacklist=qcom_iris and load the module by hand.
  	iris_hfi_gen2_create_header(hdr, 0 /*session_id*/, core->header_id++);
 --- a/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
 +++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
-@@ -7,6 +7,15 @@
+@@ -7,6 +7,18 @@
  
  #include "iris_hfi_gen2.h"
  #include "iris_hfi_gen2_packet.h"
@@ -145,10 +145,13 @@ modprobe.blacklist=qcom_iris and load the module by hand.
 + * firmware needs the 4-pipe work route. 0 = off */
 +static int venc_pipe = 0;
 +module_param(venc_pipe, int, 0644);
++/* send the vendor VBR companion property family with HFI_PROP_RATE_CONTROL */
++static int venc_vbrfamily = 1;
++module_param(venc_vbrfamily, int, 0644);
  
  #define UNSPECIFIED_COLOR_FORMAT 5
  #define NUM_SYS_INIT_PACKETS 8
-@@ -31,8 +40,23 @@
+@@ -31,8 +43,23 @@
  
  	iris_hfi_gen2_packet_sys_init(core, hdr);
  	ret = iris_hfi_queue_cmd_write_locked(core, hdr, hdr->size);
@@ -173,7 +176,7 @@ modprobe.blacklist=qcom_iris and load the module by hand.
  
  	return ret;
  }
-@@ -149,12 +173,77 @@
+@@ -149,12 +176,113 @@
  	}
  }
  
@@ -232,6 +235,42 @@ modprobe.blacklist=qcom_iris and load the module by hand.
 +	if (packet_type == HFI_PROP_LEVEL && venc_level >= 0)
 +		*(u32 *)payload = venc_level;
 +
++	if (packet_type == HFI_PROP_RATE_CONTROL && venc_vbrfamily > 0) {
++		/* vendor msm_vidc_set_vbr_related_properties + friends, with
++		 * the waipio table defaults, for the vpu20_4v firmware */
++		static const struct {
++			u32 id;
++			u32 val;
++		} family[] = {
++			{ 0x0300012b, 1 },	/* TIME_DELTA_BASED_RATE_CONTROL */
++			{ 0x0300012c, 1 },	/* CONTENT_ADAPTIVE_CODING */
++			{ 0x0300012d, 25 },	/* BITRATE_BOOST (MAX_BITRATE_BOOST) */
++			{ 0x03000176, 300 },	/* VBV_DELAY (x100ms) */
++			{ 0x0300017d, 70 },	/* MAINTAIN_MIN_QUALITY */
++			{ 0x0300014e, 2 },	/* BLUR_TYPES (ADAPTIVE) */
++			{ 0x03000122, 1 },	/* 8X8_TRANSFORM */
++			{ 0x03000151, 0 },	/* AUD (disabled) */
++			{ 0x0300017c, 22000000 },	/* TOTAL_PEAK_BITRATE */
++		};
++		u32 fval;
++		int k, r;
++
++		for (k = 0; k < ARRAY_SIZE(family); k++) {
++			fval = family[k].val;
++			iris_hfi_gen2_packet_session_property(inst,
++							      family[k].id,
++							      HFI_HOST_FLAGS_NONE,
++							      plane,
++							      HFI_PAYLOAD_U32,
++							      &fval, sizeof(u32));
++			r = iris_hfi_queue_cmd_write(inst->core,
++						     inst_hfi_gen2->packet,
++						     inst_hfi_gen2->packet->size);
++			if (r)
++				return r;
++		}
++	}
++
 +	if (packet_type == HFI_PROP_STAGE && venc_pipe > 0) {
 +		u32 pipe = venc_pipe;
 +		int r;
@@ -251,7 +290,7 @@ modprobe.blacklist=qcom_iris and load the module by hand.
  	iris_hfi_gen2_packet_session_property(inst,
  					      packet_type,
  					      flag,
-@@ -416,6 +505,9 @@
+@@ -416,6 +544,9 @@
  		break;
  	}
  
@@ -261,7 +300,7 @@ modprobe.blacklist=qcom_iris and load the module by hand.
  	inst_hfi_gen2->src_subcr_params.profile = profile;
  
  	return iris_hfi_gen2_session_set_property(inst,
-@@ -448,6 +540,9 @@
+@@ -448,6 +579,9 @@
  		break;
  	}
  

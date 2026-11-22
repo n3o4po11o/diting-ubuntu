@@ -89,3 +89,18 @@ for this firmware. Two structural gaps:
 NEXT SESSION TASK (crystal clear): port instance_data_waipio[] ENC
 entries into mainline format (new experiment v9 = sm8450_enc table +
 children audit, drop the venc_* crutches).
+
+## v9 (2026-11-23 late night)
+
+- Injected the complete vendor VBR companion family alongside
+  HFI_PROP_RATE_CONTROL: TIME_DELTA_BASED_RC=1, CONTENT_ADAPTIVE_CODING=1,
+  BITRATE_BOOST=25, VBV_DELAY=300, MAINTAIN_MIN_QUALITY=70,
+  BLUR_TYPES=ADAPTIVE(2), 8X8_TRANSFORM=1, TOTAL_PEAK_BITRATE=22Mbps.
+  All verified sent in the TX trace (enc-exp13.log).
+- **Still freezes at the same spot.** The fw narrative now shows frame-0
+  encoding begins: Worker components created, ME post-process runs,
+  SWI programmed, then `VppDec: PC refcount 0 and on is_needed 1`
+  followed by silence — the VPP power-collapse handshake at frame 0.
+  The fw is *starting* to encode but something in the VPP/interframe
+  power-collapse path is wrong (this IS the same interframe PC the r55
+  incident suspected).
