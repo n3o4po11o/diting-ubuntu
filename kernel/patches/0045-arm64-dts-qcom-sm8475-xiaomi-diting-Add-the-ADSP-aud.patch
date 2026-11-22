@@ -6,12 +6,22 @@ Subject: [PATCH 45/46] arm64: dts: qcom: sm8475-xiaomi-diting: Add the ADSP
 
 The ADSP audio PD loads dynamic AudioReach modules (e.g. the Fluence
 echo canceller) through FastRPC; creating that static PD needs a remote
-heap assigned to the LPASS and ADSP heap VMs. Size and VMIDs as the
-vendor adsp_heap_region / qcom,adsp-remoteheap-vmid; layout as on
+heap. Size and placement as the vendor adsp_heap_region; layout as on
 kodiak.
+
+2026-11-22: dropped the qcom,vmids = <LPASS ADSP_HEAP> assignment. With
+it, the fastrpc driver's qcom_scm_assign_mem() fences the 12 MiB
+shared-dma-pool from HLOS once the static PD is created; the next
+coherent allocation from that same pool then dies with a synchronous
+external abort in dcache_clean_poc() (seen with PID adsprpcd), the
+audio PD's heap ends up half-broken and the SPF never initializes
+(q6apm: CMD timeout for APM_CMD_GET_SPF_STATE, no sound card). The node
+is qcom,non-secure-domain: without vmids the DSP reaches the heap
+through the compute-cb context banks and the whole audio stack comes up
+(verified on-device 2026-11-22).
 ---
  .../boot/dts/qcom/sm8475-xiaomi-diting.dts    | 22 +++++++++++++++++++
- 1 file changed, 22 insertions(+)
+ 1 file changed, 36 insertions(+)
 
 diff --git a/arch/arm64/boot/dts/qcom/sm8475-xiaomi-diting.dts b/arch/arm64/boot/dts/qcom/sm8475-xiaomi-diting.dts
 index 13bcfdeff..57362771b 100644
@@ -45,7 +55,7 @@ index 13bcfdeff..57362771b 100644
  		ramoops@a7000000 {
  			compatible = "ramoops";
  			reg = <0x0 0xa7000000 0x0 0x400000>;
-@@ -550,6 +564,14 @@ &remoteproc_adsp {
+@@ -550,6 +564,28 @@ &remoteproc_adsp {
  	/* squashed from the vendor firmware_mnt adsp.mdt + adsp.bNN */
  	firmware-name = "qcom/sm8475/xiaomi/diting/adsp.mbn";
  	status = "okay";
@@ -54,7 +64,21 @@ index 13bcfdeff..57362771b 100644
 +		fastrpc {
 +			/* vendor: qcom,adsp-remoteheap-vmid = <LPASS ADSP_HEAP> */
 +			memory-region = <&adsp_rpc_remote_heap_mem>;
-+			qcom,vmids = <QCOM_SCM_VMID_LPASS QCOM_SCM_VMID_ADSP_HEAP>;
++			/*
++			 * Deliberately NO qcom,vmids here (2026-11-22). With
++			 * vmids, fastrpc_remote_heap_alloc() calls
++			 * qcom_scm_assign_mem() on the static audio PD's heap:
++			 * the firmware then fences those pages from HLOS, and
++			 * the very next coherent allocation out of the same
++			 * shared-dma-pool aborts in dcache_clean_poc()
++			 * (synchronous external abort, PID adsprpcd) — the
++			 * audio PD's heap ends up half-broken, the SPF never
++			 * initializes and q6apm times out on
++			 * APM_CMD_GET_SPF_STATE. This node is
++			 * qcom,non-secure-domain; without vmids the DSP maps
++			 * the heap through the compute-cb context banks, and
++			 * the whole audio stack comes up (verified on-device).
++			 */
 +		};
 +	};
  };
