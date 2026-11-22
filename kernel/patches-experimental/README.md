@@ -282,3 +282,22 @@ DEFINITIVE NEXT SESSION TASK: boot the vendor kernel (msm-5.10 from
 MiCode or LineageOS) on the phone with the waipio video driver, add
 TX/RX tracing, capture one encoder session, and diff the HFI sequence.
 This is the only way to find what enables the response path.
+
+## v19-v21: subscription experiments (critical discoveries)
+
+- v19 (subscription only): phone freezes (expected — missing other fixes)
+- v20b (all 5 fixes + subscriptions): phone SURVIVES but pipeline
+  fails at preroll; fw sends "session error 0x100000b: unknown" × 5
+- v21 (reduced subscriptions): same error
+
+**0x100000b = HFI_CMD_SUBSCRIBE_MODE** — the fw is ERRORING on our
+subscription request, likely because the property IDs are unsupported
+for encoder sessions on this fw generation.
+
+**CRITICAL DISCOVERY**: the vendor has HFI_CMD_DELIVERY_MODE (0x0100000A)
+as a SEPARATE command from SUBSCRIBE_MODE (0x0100000B). The vendor's
+`msm_venc_metadata_delivery()` probably uses DELIVERY_MODE for output
+buffer delivery, not SUBSCRIBE_MODE.
+
+NEXT: try HFI_CMD_DELIVERY_MODE for encoder output delivery instead
+of SUBSCRIBE_MODE. Also examine vendor's msm_venc_metadata_delivery().
