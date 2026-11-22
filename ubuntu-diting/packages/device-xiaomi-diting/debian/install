@@ -61,3 +61,4 @@ systemd/diting-modem-suspend.service usr/lib/systemd/system
 systemd/diting-modem-resume.service usr/lib/systemd/system
 src/diting-hardware-recovery usr/lib/diting
 systemd/diting-hardware-recovery.service usr/lib/systemd/system
+systemd/diting-always-online.service usr/lib/systemd/system

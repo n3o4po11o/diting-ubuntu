@@ -22,3 +22,5 @@ enable diting-mm-resume.service
 enable diting-modem-suspend.service
 enable diting-modem-resume.service
 enable diting-hardware-recovery.service
+# enable for always-online mode; disable for battery-saving suspend mode
+# enable diting-always-online.service

@@ -1,0 +1,16 @@
+[Unit]
+Description=Always-online: hold a sleep inhibitor so nothing auto-suspends
+# The sleep inhibitor stops Phosh's idle timer, diting-resuspend (after
+# ADSP wake-ups) and anything else that would suspend the system. The
+# modem and Wi-Fi stay online; manual suspend from the power menu still
+# works (systemd-inhibit --mode=block only blocks *idle* suspend).
+# Disable this service to return to auto-suspend behavior.
+
+[Service]
+Type=simple
+ExecStart=/bin/sh -c 'exec systemd-inhibit --what=sleep --why="diting always-online mode" --mode=block sleep infinity'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
