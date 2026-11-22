@@ -337,3 +337,42 @@ subscriptions, delivery mode, cache ops, DMA mapping, queue types).
 The remaining pure-RE approach: disassemble the firmware binary
 (vpu20_4v.mbn, Hexagon DSP) to find the encoder response generation
 code path and its enabling conditions.
+
+## v30: hardcoded all-fixes + polling — CRASH, three bugs found offline
+
+- All 6 fixes hardcoded via `v30_all_fixes.py` on a clean tree; the gst
+  encoder test crashed the phone with zero POLL prints (the polling code
+  never got to run).
+- Post-mortem — three real bugs, none of them the polling idea itself:
+  1. **PIPE packet id typo: `0x100000b`** — that is `0x0100000b` =
+     HFI_CMD_SUBSCRIBE_MODE, the very command v19-v23 proved fatal to
+     this firmware. HFI_PROP_PIPE is `0x0300010b`. Every STAGE was
+     followed by an injected session-killer.
+  2. Polling completed buffers with bare `vb2_buffer_done()` — no
+     removal from the m2m dst list, no sequence/timestamp handling,
+     outside every lock. The driver's own path is
+     `iris_vb2_buffer_done()` (v4l2_m2m_buf_done underneath).
+  3. v30 skipped interframe PC by deleting the resume-path call site
+     only; `iris_hfi_core_init()` still sends the property. v10's
+     venc_nopc returns 0 inside the op, covering every call site.
+- `v30_all_fixes.py` kept for the record; never build it again.
+
+## v31: v10-exact module params + FIXED polling (in flight)
+
+`v31_all_fixes.py`, applied to a clean tree:
+
+- `no_encoder = false`
+- venc_profile=4 / venc_level=14 / venc_pipe=4 / venc_nopc=1 as module
+  params whose DEFAULTS reproduce the proven v10 session (payload-level
+  override at the top of session_set_property catches the streamon
+  batch replay; src_subcr_params-level override too — both levels
+  exactly like the 0106 patch did)
+- VBR companion family on HFI_PROP_RATE_CONTROL (same 9 values as 0106)
+- polling: per-codec-interrupt walk of encoder instances, core->lock /
+  inst->lock taken in the release-first dance (never nested), buffers
+  completed ONLY via `iris_vb2_buffer_done()` when their memory is
+  non-empty
+- every HFI id by named constant — the v30 typo class is impossible
+
+Test: blacklist boot, manual modprobe, gst encoder run; success =
+`POLL: enc output idx=N size=N` in dmesg AND a non-zero output file.
