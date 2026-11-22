@@ -190,18 +190,29 @@ afterwards with `dmesg -w` running. Never put `printk_delay` on the whole
 boot cmdline either — it makes a hung boot look like a slow one for half
 an hour.
 
-**Encoder death ladder (2026-11-23, experiment v5 in
+**Encoder death ladder (2026-11-23, experiment v6 in
 kernel/patches-experimental/)**: full HFI tracing narrowed the r35 hang
 step by step. The vpu20_4v firmware leaves `fw_caps[PROFILE/LEVEL]` at 0
 (mainline caps parser doesn't populate them; the V4L2 ctrl defaults
 H.264 High=4 / level 5.0=14 numerically equal the HFI enum values).
 Baseline dies at session START; skipping PROFILE/LEVEL passes START;
 forcing 4/14 (verified in the HFI payload) dies after ALL buffers are
-queued — **the firmware now hangs attempting the first encoded frame**.
+queued — the firmware now hangs attempting the first encoded frame.
 Geometry, strides, color format (NV12 linear = 1) and every buffer
-descriptor verified sane against the vendor driver. Next lever: port the
-vendor firmware debug log (`HFI_PROP_DEBUG_LOG_LEVEL` + SYS_DEBUG_CONFIG,
-see msm_vidc_debug.c) so the firmware reports its own death reason.
+descriptor verified sane against the vendor driver.
+
+**v6: the firmware's own log ported and working** (venc_fwlog=1 sends
+the vendor `HFI_PROP_DEBUG_CONFIG`/`DEBUG_LOG_LEVEL` after sys_init; the
+mainline `flush_debug_queue` prints them). The firmware's last words at
+the freeze (enc-exp9.log): it receives the final VPSS buffer, accepts
+`HFI_CMD_START`, creates the Worker/VPPSG/VSPAP/Reorder components,
+sends the **START success response** — and dies the moment the encode
+pipeline actually runs (VPPSG touching the first RAW frame). The
+remaining suspect class is hardware pipeline configuration: VPP work
+mode/stage values, the linear-vs-UBWC VPP path (note the fw's own
+`vzip_20_enable 1` line), or encode-path clocks. Next step: enumerate
+the vendor's full session-init property VALUES (msm_vidc_waipio.c caps
+defaults) and diff them against our TX payload log field by field.
 
 ### Browser video decoding (VA-API over V4L2)
 

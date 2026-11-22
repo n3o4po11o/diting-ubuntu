@@ -24,6 +24,11 @@ directory is ever built into a kernel image.
   - Verified sane: geometry (RAW 1280x1104 = 0x159000, BITSTREAM
     0xad000, strides/colorspace/NV12-linear fmt=1), all internal buffer
     sizes (BIN/LINE/ARP/COMV/NON_COMV/DPB/VPSS), buffer descriptors.
-  - Next: port the vendor's firmware debug log (HFI_PROP_DEBUG_LOG_
-    LEVEL + SYS_DEBUG_CONFIG, msm_vidc_debug.c) into the experiment so
-    the fw reports its own death reason at first-frame time.
+  - v6: firmware debug log ported and WORKING (venc_fwlog=1). The fw
+    accepts HFI_CMD_START, creates Worker/VPPSG/VSPAP/Reorder
+    components, sends the START success response — and dies the moment
+    the encode pipeline runs (VPPSG on the first RAW frame). Remaining
+    suspects: VPP work mode/stage values, linear-vs-UBWC VPP path (fw
+    logs "vzip_20_enable 1"), encode clocks. Next: diff every
+    session-init property VALUE against msm_vidc_waipio.c caps
+    defaults (enc-exp9.log has the fw narrative + our payloads).

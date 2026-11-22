@@ -69,9 +69,73 @@ modprobe.blacklist=qcom_iris and load the module by hand.
  
  	if (core->state == IRIS_CORE_ERROR || core->state == IRIS_CORE_DEINIT)
  		return -EINVAL;
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2_packet.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2_packet.c
+@@ -282,6 +282,24 @@
+ 				    sizeof(u32));
+ }
+ 
++/* EXPERIMENT: vendor HFI_PROP_DEBUG_CONFIG / DEBUG_LOG_LEVEL */
++void iris_hfi_gen2_packet_sys_debug_config(struct iris_core *core, struct iris_hfi_header *hdr)
++{
++	u32 cfg = 1;      /* HFI_DEBUG_CONFIG_CLRDBGQ */
++	u32 level = 0x2b; /* ERR | FATAL | PERF | HIGH */
++
++	iris_hfi_gen2_create_header(hdr, 0 /*session_id*/, core->header_id++);
++
++	iris_hfi_gen2_create_packet(hdr, 0x0300000a,
++				    HFI_HOST_FLAGS_NONE, HFI_PAYLOAD_U32_ENUM,
++				    HFI_PORT_NONE, core->packet_id++,
++				    &cfg, sizeof(u32));
++	iris_hfi_gen2_create_packet(hdr, 0x0300000b,
++				    HFI_HOST_FLAGS_NONE, HFI_PAYLOAD_U32_ENUM,
++				    HFI_PORT_NONE, core->packet_id++,
++				    &level, sizeof(u32));
++}
++
+ void iris_hfi_gen2_packet_sys_pc_prep(struct iris_core *core, struct iris_hfi_header *hdr)
+ {
+ 	iris_hfi_gen2_create_header(hdr, 0 /*session_id*/, core->header_id++);
 --- a/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
 +++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
-@@ -149,12 +149,61 @@
+@@ -7,6 +7,11 @@
+ 
+ #include "iris_hfi_gen2.h"
+ #include "iris_hfi_gen2_packet.h"
++#include <linux/moduleparam.h>
++
++/* ask the firmware for its own logs after boot (encoder experiment) */
++static int venc_fwlog = 1;
++module_param(venc_fwlog, int, 0644);
+ 
+ #define UNSPECIFIED_COLOR_FORMAT 5
+ #define NUM_SYS_INIT_PACKETS 8
+@@ -31,8 +36,23 @@
+ 
+ 	iris_hfi_gen2_packet_sys_init(core, hdr);
+ 	ret = iris_hfi_queue_cmd_write_locked(core, hdr, hdr->size);
+-
+ 	kfree(hdr);
++	if (ret)
++		return ret;
++
++	/* EXPERIMENT: ask the firmware for its own logs */
++	if (venc_fwlog) {
++		void iris_hfi_gen2_packet_sys_debug_config(
++			struct iris_core *c, struct iris_hfi_header *h);
++
++		hdr = kzalloc(SYS_INIT_PKT_SIZE, GFP_KERNEL);
++		if (!hdr)
++			return -ENOMEM;
++
++		iris_hfi_gen2_packet_sys_debug_config(core, hdr);
++		ret = iris_hfi_queue_cmd_write_locked(core, hdr, hdr->size);
++		kfree(hdr);
++	}
+ 
+ 	return ret;
+ }
+@@ -149,12 +169,61 @@
  	}
  }
  
@@ -133,7 +197,7 @@ modprobe.blacklist=qcom_iris and load the module by hand.
  	iris_hfi_gen2_packet_session_property(inst,
  					      packet_type,
  					      flag,
-@@ -416,6 +465,9 @@
+@@ -416,6 +485,9 @@
  		break;
  	}
  
@@ -143,7 +207,7 @@ modprobe.blacklist=qcom_iris and load the module by hand.
  	inst_hfi_gen2->src_subcr_params.profile = profile;
  
  	return iris_hfi_gen2_session_set_property(inst,
-@@ -448,6 +500,9 @@
+@@ -448,6 +520,9 @@
  		break;
  	}
  
