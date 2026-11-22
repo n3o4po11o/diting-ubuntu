@@ -321,3 +321,19 @@ ALL USERSPACE-LEVEL FIXES EXHAUSTED (v1-v23, 2026-11-23). The encoder:
 
 DEFINITIVE REMAINING PATH: boot vendor kernel (msm-5.10) with TX
 tracing on the waipio video driver. This is the only approach left.
+
+## v25: queue_type bit flags — DISPROVED (breaks fw init)
+
+Changed queue_type from sequential (0,1,2) to bit flags (1,2,4) based
+on vendor code using `|=` with HFI_Q_ID_* constants. Result: firmware
+"core init failed" — the firmware REQUIRES sequential (0,1,2) values.
+
+The vendor's `|=` with symbolic names must produce the same sequential
+values (the initial default value already has 0, so |=0 is no-op, |=1
+sets to 1, etc.). Queue types are NOT the output delivery issue.
+
+**All pure-RE comparisons now exhausted** (DT, queue setup, HFI props,
+subscriptions, delivery mode, cache ops, DMA mapping, queue types).
+The remaining pure-RE approach: disassemble the firmware binary
+(vpu20_4v.mbn, Hexagon DSP) to find the encoder response generation
+code path and its enabling conditions.
