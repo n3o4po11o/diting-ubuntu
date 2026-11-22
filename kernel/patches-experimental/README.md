@@ -258,3 +258,27 @@ Remaining: increase wait time before DRAIN to 30+ seconds (to match the
 fw's encoding latency), or investigate why encoding takes 37 seconds
 (normal would be milliseconds). The slow start might indicate a power
 state or clock ramp-up issue.
+
+## FINAL DIAGNOSIS (end of campaign)
+
+The vpu20_4v encoder firmware:
+- Accepts session configuration (with our 4 root-cause fixes) ✓
+- Encodes H.264 frames (verified by fw logs: IDR + P) ✓
+- Writes bitstream data to userspace BITSTREAM buffers (verified by
+  /dev/mem: 32/32 bytes nonzero) ✓
+- Consumes input buffers ✓
+- **NEVER writes HFI_CMD_BUFFER responses to the response queue** ✗
+
+The 272 interrupts are all from debug-queue writes, not message-queue
+responses. Without responses, the driver never calls vb2_buffer_done(),
+and userspace never receives the encoded data.
+
+The vendor kernel (msm-5.10 + waipio driver) gets responses from this
+same firmware. Something about the vendor's kernel configuration
+(SMMU context, clock tree, IOMMU mapping, or DT power domain) enables
+the firmware's response generation path.
+
+DEFINITIVE NEXT SESSION TASK: boot the vendor kernel (msm-5.10 from
+MiCode or LineageOS) on the phone with the waipio video driver, add
+TX/RX tracing, capture one encoder session, and diff the HFI sequence.
+This is the only way to find what enables the response path.
