@@ -194,3 +194,27 @@ PLAN FOR NEXT SESSION (definitive approach): boot the VENDOR kernel
 driver, run one encode session, capture the COMPLETE HFI TX sequence,
 then diff every property/command/value against our mainline trace.
 This will find the enabling difference conclusively.
+
+## v14: QUALITY_MODE + SESSION_PRIORITY + TIER + ROTATION — still zero
+
+Systematic diff of ALL 95 vendor-sendable HFI properties vs our 48-sent
+TX trace found 66 never-sent properties. Injected the 5 most promising
+(BUFFER_FW_MIN_OUTPUT_COUNT, QUALITY_MODE=POWER_SAVE, SESSION_PRIORITY,
+TIER, ROTATION). Output buffers remain completely zero.
+
+**Property-level differences are now EXHAUSTED.** The output delivery
+gap is NOT about which HFI properties we send. The remaining suspects:
+
+1. **SMMU/IOMMU context bank permissions** — the fw can READ input
+   buffers but may not have WRITE access to BITSTREAM buffer addresses
+   through its SMMU context bank. The vendor kernel (msm-5.10) may
+   configure the video SMMU differently.
+2. **DMA mapping type** — vendor uses its own msm_vidc_memory.c mapping;
+   mainline uses vb2 dma-contiguous. Subtle attribute differences
+   (coherency, direction) could block fw writes.
+3. **Firmware output path** — this specific fw version may genuinely
+   use a copy-from-internal mechanism that the vendor driver implements
+   in its response handler.
+
+NEXT: check SMMU context bank configuration for the video codec
+(adsp/cb indexes in the DT), or boot the vendor kernel with TX tracing.
