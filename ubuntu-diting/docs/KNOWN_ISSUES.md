@@ -373,6 +373,45 @@ Next steps when picking this up:
 - Decisive test: extract the EEA firmware_mnt's adsp image from an EEA
   fastboot ROM and run it with the CN extraction for everything else.
 
+## UFS controller wedges after SoC-level crash loops (2026-11-23, RESOLVED same day)
+
+After a day of iris-encoder experiments killed the SoC repeatedly
+(watchdog resets), the phone stopped booting to a usable system: the
+kernel and initramfs came up, but the rootfs never mounted — black
+screen, no USB network.
+
+Symptoms (visible only through the `diting.debug=usb` initramfs shell):
+
+- `ufshcd_check_errors: saved_err 0x4 saved_uic_err 0x4` error storm,
+  SCSI commands fail with hostbyte=0x07, err handler loops forever.
+- Raw single-sector reads at the start of sda37 succeed; reads further
+  into the partition HANG. `mount` fails with I/O error.
+- Driver-level `unbind`/`bind` of ufshcd-qcom restores short reads
+  briefly — not a fix.
+
+Root cause: UFS controller/link state machine left wedged by the crash
+loop. Every reboot of the day (fastboot, watchdog, `reboot -f`) is a
+WARM reset — the UFS power domain never drops, so the wedge survives
+all of them.
+
+The fix — a true power cycle:
+
+1. Boot the debug image (`DITING_ROOT_CMDLINE="diting.debug=usb"`),
+   wait for the `cu.usbmodem*` serial node on the Mac.
+2. If the shell is stuck, force-reset (long-press power) and retry.
+3. Send `poweroff -f` over the serial shell (skip sync — the point is
+   to cut power, not to touch the broken storage).
+4. Wait 30 s+, power on cold.
+
+After the cold boot: zero ufshcd errors, rootfs mounts, system is
+normal. No reflash was needed; the filesystem survived.
+
+Discipline for future encoder experiments: every fw-crash session has
+a nonzero chance of wedging UFS this way. End such a session with a
+deliberate `poweroff` + cold boot before trusting the phone again. If
+a full reflash is ever wanted anyway, a complete r51 owner set is kept
+at `release/r51-images/` on the Mac (boot, vendor_boot, sparse rootfs).
+
 ## Kernels after r51 black-screened at boot: initramfs lost e2fsck (2026-11-23, RESOLVED)
 
 Every -52-era boot image hung before the rootfs came up (PID 1 stuck in
