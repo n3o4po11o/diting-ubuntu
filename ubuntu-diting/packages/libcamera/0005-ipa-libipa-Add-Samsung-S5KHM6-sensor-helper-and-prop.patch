@@ -1,0 +1,64 @@
+From 0000000000000000000000000000000000000001 Mon Sep 17 00:00:00 2001
+From: diting <diting@localhost>
+Date: Sat, 22 Nov 2026 20:00:00 +0100
+Subject: [PATCH 5/5] ipa: libipa: Add Samsung S5KHM6 sensor helper and properties
+
+The CN main camera of the diting. Same gain model as the S5KHP1
+(CCS: code 32 = 1x, 10-bit, black level 0x40) and the same delay
+of 2 frames from the module data delayInfo (linecount 2, gain 2,
+frameLengthLines 2); 0.64 um pixels.
+---
+ src/ipa/libipa/camera_sensor_helper.cpp          | 12 ++++++++++++
+ src/libcamera/sensor/camera_sensor_properties.cpp | 16 +++++++++++++
+ 2 files changed, 28 insertions(+)
+
+--- a/src/ipa/libipa/camera_sensor_helper.cpp	2026-11-22 19:23:04.792409188 +0800
++++ b/src/ipa/libipa/camera_sensor_helper.cpp	2026-11-22 19:23:04.792409188 +0800
+@@ -799,7 +799,21 @@
+ 		gain_ = AnalogueGainLinear{ 1, 0, 0, 32 };
+ 	}
+ };
+-REGISTER_CAMERA_SENSOR_HELPER("s5khp1", CameraSensorHelperS5khp1)class CameraSensorHelperS5k4h7 : public CameraSensorHelper
++REGISTER_CAMERA_SENSOR_HELPER("s5khp1", CameraSensorHelperS5khp1)
++
++class CameraSensorHelperS5khm6 : public CameraSensorHelper
++{
++public:
++	CameraSensorHelperS5khm6()
++	{
++		/* 0x40 at 10 bits; analogue gain code 32 = 1x (CCS) */
++		blackLevel_ = 4096;
++		gain_ = AnalogueGainLinear{ 1, 0, 0, 32 };
++	}
++};
++REGISTER_CAMERA_SENSOR_HELPER("s5khm6", CameraSensorHelperS5khm6)
++
++class CameraSensorHelperS5k4h7 : public CameraSensorHelper
+ {
+ public:
+ 	CameraSensorHelperS5k4h7()
+--- a/src/libcamera/sensor/camera_sensor_properties.cpp	2026-11-22 19:23:04.792409188 +0800
++++ b/src/libcamera/sensor/camera_sensor_properties.cpp	2026-11-22 19:23:04.792409188 +0800
+@@ -519,6 +519,22 @@
+ 				.hblankDelay = 2
+ 			},
+ 		} },
++		{ "s5khm6", {
++			.unitCellSize = { 640, 640 },
++			.testPatternModes = {
++				{ controls::draft::TestPatternModeOff, 0 },
++				{ controls::draft::TestPatternModeSolidColor, 1 },
++				{ controls::draft::TestPatternModeColorBars, 2 },
++				{ controls::draft::TestPatternModeColorBarsFadeToGray, 3 },
++				{ controls::draft::TestPatternModePn9, 4 },
++			},
++			.sensorDelays = {
++				.exposureDelay = 2,
++				.gainDelay = 2,
++				.vblankDelay = 2,
++				.hblankDelay = 2
++			},
++		} },
+ 		{ "s5k4h7", {
+ 			.unitCellSize = { 1120, 1120 },
+ 			.testPatternModes = {
