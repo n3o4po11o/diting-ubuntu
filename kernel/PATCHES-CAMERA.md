@@ -84,5 +84,5 @@ ssh mt8788-build "tmux new-session -d -s k50ultra-build 'cd ~/k50ultra/diting-ub
 
 - DW9800V 执行器驱动（对焦）— CN 模组数据在模块 bin actuatorDriver 节点（0x0c）
 - 前摄 IMX596、微距 GC02M1 驱动（模块 bin 均在 CN ROM 里：`..._sunny_imx596_front.bin`、`..._ofilm_gc02m1_macro.bin`）
-- libcamera sensor properties / soft IPA 对 s5khm6 的正式调参（当前为 s5khp1.yaml 改名占位；`cam` 有 "No static properties / sensor helper" 告警）
+- ~~libcamera sensor helper 告警~~ **已解决（2026-11-23）**：libcamera 重建（补丁 0005）已装机，"no sensor helper/static properties" 告警消失，曝光范围正确映射（8-6218），31fps 采集验证通过。（竞速实况：服务器 qemu 构建 ~2.5h 先完成；手机 Docker 构建在装依赖阶段即被淘汰，已停）
 - s5k4h7.yaml 未装进手机（simple IPA 回落到 uncalibrated.yaml）
