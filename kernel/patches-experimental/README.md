@@ -180,3 +180,17 @@ c) Has a specific HFI property that enables direct output mode
 NEXT: trace the vendor venus_hfi TX for a complete encoder session
 (add TX tracing to the vendor driver on a spare boot) and diff every
 HFI property/command against ours to find the enabling difference.
+
+## v13: MIN_OUTPUT_COUNT added — still all zeros
+
+Added HFI_PROP_BUFFER_FW_MIN_OUTPUT_COUNT=4 to the injected family.
+BITSTREAM buffers remain completely zero. Port assignment, buffer
+flags (CB_NON_SECURE), ordering (internal bufs → START → user bufs),
+and size all verified identical to vendor. Every simple difference
+eliminated; the output delivery gap is deep in the fw's encoder path.
+
+PLAN FOR NEXT SESSION (definitive approach): boot the VENDOR kernel
+(msm-5.10 with the waipio video driver), add TX tracing to the vendor
+driver, run one encode session, capture the COMPLETE HFI TX sequence,
+then diff every property/command/value against our mainline trace.
+This will find the enabling difference conclusively.
