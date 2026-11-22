@@ -141,3 +141,21 @@ REMAINING WORK: port the vendor encoder output buffer delivery path
 (msm_vidc_buffer.c → iris equivalent), or find the specific HFI
 property/command that tells this fw generation to write encoded output
 into the userspace BITSTREAM buffers.
+
+## Output delivery investigation (end of session)
+
+- 272 interrupts fire during encoding (all from debug queue writes)
+- Message queue is empty after setup — fw literally never writes
+  HFI_CMD_BUFFER responses for the encoder
+- v4l2-ctl direct streaming confirms same behavior as gst
+
+**Leading hypothesis**: the vendor `venus_hfi_queue_buffer()` queues a
+METADATA buffer alongside every data buffer (metabuf param). The fw may
+require metadata buffers to enable output delivery tracking. The vendor
+capability table has META_* entries (META_SEQ_HDR_NAL, META_LTR_MARK_USE,
+META_ENC_QP_METADATA, META_ROI_INFO) that we never queue.
+
+NEXT: port the vendor metadata buffer queuing for the encoder (queue
+a metadata buffer alongside each output BITSTREAM buffer), or
+investigate whether a specific HFI property enables output delivery
+without metadata.
