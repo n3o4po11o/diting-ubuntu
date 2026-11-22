@@ -68,3 +68,24 @@ directory is ever built into a kernel image.
   builds the session from the ANSWER; mainline never queries at all)
   and dump what this fw advertises, then drive the session strictly by
   those values.
+
+## FINAL UNDERSTANDING (end of the v8 session)
+
+The vendor driver does NOT query the firmware: Qualcomm maintains a
+per-platform STATIC capability table — `instance_data_waipio[]` in
+msm_vidc_waipio.c IS the authoritative description of what the vpu20_4v
+firmware accepts. The mainline driver wrongly reuses the sm8550 table
+for this firmware. Two structural gaps:
+
+1. Table content: waipio ENC entries (min/max/mask/DEFAULT per codec)
+   differ from sm8550 in details; must be translated into a new
+   `inst_fw_cap_sm8450_enc[]` and wired into iris_hfi_gen2_vpu2_data.
+2. Dependency children: vendor caps carry child lists (e.g. PROFILE ->
+   {ENTROPY_MODE, TRANSFORM_8X8}) and the framework adjusts children
+   when a root changes (baseline forces CAVLC). Mainline has no such
+   mechanism — gst sets profile=baseline while ENTROPY_MODE stays
+   CABAC=1, an illegal combination for the encoder.
+
+NEXT SESSION TASK (crystal clear): port instance_data_waipio[] ENC
+entries into mainline format (new experiment v9 = sm8450_enc table +
+children audit, drop the venc_* crutches).
