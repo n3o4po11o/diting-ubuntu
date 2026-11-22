@@ -1,0 +1,12 @@
+[Unit]
+Description=Recover Bluetooth and USB gadget from stuck states
+After=bluetooth.service diting-usb-gadget.service
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/diting/diting-hardware-recovery
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

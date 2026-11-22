@@ -1,0 +1,85 @@
+#!/bin/sh
+# Watch for hardware components stuck in a bad state after OTG role
+# switches, long uptime, or suspend cycles, and recover them:
+#
+#   1. Bluetooth: the QCA6490 controller deadlocks on UART (tx timeout,
+#      "Unable to drain transmitter") after OTG use or long uptime.
+#      Fix: reload hci_uart module.
+#
+#   2. USB gadget: the dwc3 controller sticks in a bad PM state after
+#      an OTG adapter was used and removed ("failed to suspend: -11").
+#      Fix: unbind/rebind dwc3-qcom + reconfigure the gadget.
+#
+# Runs once a minute; each check is near-instant when healthy.
+LOG_TAG=diting-hw-recovery
+BT_DOWN_COUNT=0
+USB_DOWN_COUNT=0
+
+check_bt() {
+	# hci0 exists but DOWN = controller deadlock
+	if [ -d /sys/class/bluetooth/hci0 ]; then
+		if ! hciconfig hci0 2>/dev/null | grep -q "UP RUNNING"; then
+			return 1
+		fi
+	fi
+	return 0
+}
+
+recover_bt() {
+	logger -t "$LOG_TAG" "bluetooth controller down, reloading hci_uart"
+	rmmod hci_uart btqca 2>/dev/null
+	sleep 2
+	modprobe hci_uart
+	sleep 5
+	# bluetoothd should pick it up automatically; power it on too
+	hciconfig hci0 up 2>/dev/null || true
+	logger -t "$LOG_TAG" "bluetooth recovery done"
+}
+
+check_usb() {
+	# usb0 exists but NO-CARRIER with the gadget configured
+	if ip link show usb0 2>/dev/null | grep -q "NO-CARRIER"; then
+		# only if we're in device mode (not OTG host)
+		role=$(cat /sys/class/typec/port0/data_role 2>/dev/null)
+		case "$role" in
+		*device*) return 1 ;;
+		esac
+	fi
+	return 0
+}
+
+recover_usb() {
+	logger -t "$LOG_TAG" "usb gadget no carrier, resetting dwc3"
+	local dev=a600000.usb
+	local drv=/sys/bus/platform/drivers/dwc3-qcom
+	echo "$dev" > "$drv/unbind" 2>/dev/null
+	sleep 3
+	echo "$dev" > "$drv/bind" 2>/dev/null
+	sleep 3
+	/usr/lib/diting/diting-usb-gadget start 2>/dev/null || true
+	logger -t "$LOG_TAG" "usb gadget recovery done"
+}
+
+while :; do
+	sleep 60
+
+	if ! check_bt; then
+		BT_DOWN_COUNT=$((BT_DOWN_COUNT + 1))
+		if [ "$BT_DOWN_COUNT" -ge 2 ]; then
+			BT_DOWN_COUNT=0
+			recover_bt
+		fi
+	else
+		BT_DOWN_COUNT=0
+	fi
+
+	if ! check_usb; then
+		USB_DOWN_COUNT=$((USB_DOWN_COUNT + 1))
+		if [ "$USB_DOWN_COUNT" -ge 2 ]; then
+			USB_DOWN_COUNT=0
+			recover_usb
+		fi
+	else
+		USB_DOWN_COUNT=0
+	fi
+done
