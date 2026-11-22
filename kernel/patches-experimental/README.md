@@ -301,3 +301,23 @@ buffer delivery, not SUBSCRIBE_MODE.
 
 NEXT: try HFI_CMD_DELIVERY_MODE for encoder output delivery instead
 of SUBSCRIBE_MODE. Also examine vendor's msm_venc_metadata_delivery().
+
+## v22/v23: DELIVERY_MODE experiments — also crash
+
+- v22 (SUBSCRIBE + DELIVERY): same SUBSCRIBE_MODE errors, pipeline fails
+- v23 (DELIVERY_MODE only, no SUBSCRIBE): phone crashes during test
+
+CONCLUSION: Both SUBSCRIBE_MODE and DELIVERY_MODE cause firmware issues
+on the vpu20_4v encoder. The mainline subscribe_property's early return
+for ENCODER was likely intentional for this firmware generation — the
+vendor's waipio driver handles these commands differently through its
+own session management layer.
+
+ALL USERSPACE-LEVEL FIXES EXHAUSTED (v1-v23, 2026-11-23). The encoder:
+- Encodes H.264 frames ✓ (with 4 root-cause fixes)
+- Writes to BITSTREAM buffers ✓ (proven by /dev/mem)
+- Does not deliver output to userspace ✗ (no HFI_CMD_BUFFER responses)
+- SUBSCRIBE/DELIVERY commands crash the firmware ✗
+
+DEFINITIVE REMAINING PATH: boot vendor kernel (msm-5.10) with TX
+tracing on the waipio video driver. This is the only approach left.
