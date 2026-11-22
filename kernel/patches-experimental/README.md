@@ -32,3 +32,23 @@ directory is ever built into a kernel image.
     logs "vzip_20_enable 1"), encode clocks. Next: diff every
     session-init property VALUE against msm_vidc_waipio.c caps
     defaults (enc-exp9.log has the fw narrative + our payloads).
+
+## v7/v8 round (2026-11-23, later)
+
+- v7: HFI_PROP_PIPE(0x300010b)=4 injected after every STAGE (upstream
+  sm8550 ENC caps table simply has no PIPE entry; DEC table does). Sent
+  and verified — freeze unchanged.
+- v8: venc_maxclk=1 forces the top OPP + max table bandwidth for enc
+  sessions — the freeze came EARLIER (before fw component creation).
+- Verified correct: codec id (0x3000100 payload 2 = ENCODE_AVC; the fw's
+  "HEVCEncodeMode" log lines are internal naming, not a session mixup),
+  CSC not required for the gst test case (vendor sends it only on
+  REC709 conversion, conditionally).
+- CONVERGED ROOT-CAUSE HYPOTHESIS: the firmware capabilities handshake
+  parser is broken for vpu20_4v (fw_caps[PROFILE/LEVEL]=0 proves it).
+  The vendor builds session values FROM the fw-advertised caps; we send
+  static sm8550-table values that disagree with what this firmware
+  advertised, and the pipeline dies on the mismatch. NEXT MAIN TASK:
+  port/fix the caps response parser (compare iris_hfi_gen2_response.c
+  caps parsing with vendor venus_hfi_response.c for this fw generation),
+  then drop the venc_profile/level/pipe crutches.

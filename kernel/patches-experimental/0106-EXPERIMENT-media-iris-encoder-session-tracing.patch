@@ -69,6 +69,40 @@ modprobe.blacklist=qcom_iris and load the module by hand.
  
  	if (core->state == IRIS_CORE_ERROR || core->state == IRIS_CORE_DEINIT)
  		return -EINVAL;
+--- a/drivers/media/platform/qcom/iris/iris_power.c
++++ b/drivers/media/platform/qcom/iris/iris_power.c
+@@ -13,6 +13,11 @@
+ #include "iris_resources.h"
+ #include "iris_vpu_common.h"
+ 
++/* Debug knob: force maximum clocks and bandwidth for encoder sessions
++ * (the vpu2 cycle constants are decode-era; encode needs far more). */
++static int venc_maxclk;
++module_param(venc_maxclk, int, 0644);
++
+ static u32 iris_calc_bw(struct iris_inst *inst, struct icc_vote_data *data)
+ {
+ 	const struct bw_info *bw_tbl = NULL;
+@@ -36,6 +41,9 @@
+ 	}
+ 
+ exit:
++	if (venc_maxclk && inst->domain == ENCODER && bw_tbl && num_rows)
++		icc_bw = bw_tbl[num_rows - 1].bw_ddr;
++
+ 	return icc_bw;
+ }
+ 
+@@ -116,6 +124,9 @@
+ 
+ 	inst->power.min_freq = vpu_ops->calc_freq(inst, inst->max_input_data_size);
+ 
++	if (venc_maxclk && inst->domain == ENCODER)
++		inst->power.min_freq = UINT_MAX / 2;
++
+ 	return iris_set_clocks(inst);
+ }
+ 
 --- a/drivers/media/platform/qcom/iris/iris_hfi_gen2_packet.c
 +++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2_packet.c
 @@ -282,6 +282,24 @@
@@ -98,7 +132,7 @@ modprobe.blacklist=qcom_iris and load the module by hand.
  	iris_hfi_gen2_create_header(hdr, 0 /*session_id*/, core->header_id++);
 --- a/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
 +++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
-@@ -7,6 +7,11 @@
+@@ -7,6 +7,15 @@
  
  #include "iris_hfi_gen2.h"
  #include "iris_hfi_gen2_packet.h"
@@ -107,10 +141,14 @@ modprobe.blacklist=qcom_iris and load the module by hand.
 +/* ask the firmware for its own logs after boot (encoder experiment) */
 +static int venc_fwlog = 1;
 +module_param(venc_fwlog, int, 0644);
++/* the upstream sm8550 enc caps table has no PIPE cap; the vpu20_4v
++ * firmware needs the 4-pipe work route. 0 = off */
++static int venc_pipe = 0;
++module_param(venc_pipe, int, 0644);
  
  #define UNSPECIFIED_COLOR_FORMAT 5
  #define NUM_SYS_INIT_PACKETS 8
-@@ -31,8 +36,23 @@
+@@ -31,8 +40,23 @@
  
  	iris_hfi_gen2_packet_sys_init(core, hdr);
  	ret = iris_hfi_queue_cmd_write_locked(core, hdr, hdr->size);
@@ -135,7 +173,7 @@ modprobe.blacklist=qcom_iris and load the module by hand.
  
  	return ret;
  }
-@@ -149,12 +169,61 @@
+@@ -149,12 +173,77 @@
  	}
  }
  
@@ -194,10 +232,26 @@ modprobe.blacklist=qcom_iris and load the module by hand.
 +	if (packet_type == HFI_PROP_LEVEL && venc_level >= 0)
 +		*(u32 *)payload = venc_level;
 +
++	if (packet_type == HFI_PROP_STAGE && venc_pipe > 0) {
++		u32 pipe = venc_pipe;
++		int r;
++
++		iris_hfi_gen2_packet_session_property(inst,
++					      HFI_PROP_PIPE,
++					      HFI_HOST_FLAGS_NONE,
++					      plane,
++					      HFI_PAYLOAD_U32,
++					      &pipe, sizeof(u32));
++		r = iris_hfi_queue_cmd_write(inst->core, inst_hfi_gen2->packet,
++					     inst_hfi_gen2->packet->size);
++		if (r)
++			return r;
++	}
++
  	iris_hfi_gen2_packet_session_property(inst,
  					      packet_type,
  					      flag,
-@@ -416,6 +485,9 @@
+@@ -416,6 +505,9 @@
  		break;
  	}
  
@@ -207,7 +261,7 @@ modprobe.blacklist=qcom_iris and load the module by hand.
  	inst_hfi_gen2->src_subcr_params.profile = profile;
  
  	return iris_hfi_gen2_session_set_property(inst,
-@@ -448,6 +520,9 @@
+@@ -448,6 +540,9 @@
  		break;
  	}
  
