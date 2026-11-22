@@ -1,0 +1,124 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: royka1 <397414+royka1@users.noreply.github.com>
+Date: Sat, 22 Nov 2026 21:30:00 +0100
+Subject: [PATCH] EXPERIMENT media: iris: encoder session tracing
+
+EXPERIMENT ONLY, never for the permanent series: re-register the
+encoder on SM8450 and trace every HFI packet in both directions
+(dynamic debug), to catch the last command before the firmware
+hangs at encoder session start. Boot with
+modprobe.blacklist=qcom_iris and load the module by hand.
+---
+ drivers/media/platform/qcom/iris/iris_hfi_gen2_response.c |  4 +++
+ drivers/media/platform/qcom/iris/iris_hfi_queue.c         | 14 +++++++++
+ drivers/media/platform/qcom/iris/iris_platform_vpu2.c     |  8 +++--
+ 3 files changed
+
+--- a/drivers/media/platform/qcom/iris/iris_platform_vpu2.c
++++ b/drivers/media/platform/qcom/iris/iris_platform_vpu2.c
+@@ -161,10 +161,11 @@
+ 	.tz_cp_config_data_size = ARRAY_SIZE(tz_cp_config_vpu2),
+ 	.num_vpp_pipe = 4,
+ 	/*
+-	 * The encoder hangs the firmware at the start of a session and the
+-	 * next register access resets the SoC; keep it off until fixed.
++	 * EXPERIMENT ONLY: encoder on with full HFI tracing, for the
++	 * post-boot manual `modprobe qcom_iris` test loop. Never boot
++	 * without modprobe.blacklist=qcom_iris while this is set.
+ 	 */
+-	.no_encoder = true,
++	.no_encoder = false,
+ 	.max_session_count = 16,
+ 	.max_core_mbpf = NUM_MBS_8K,
+ 	.max_core_mbps = ((7680 * 4320) / 256) * 60,
+--- a/drivers/media/platform/qcom/iris/iris_hfi_queue.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_queue.c
+@@ -6,6 +6,7 @@
+ #include <linux/pm_runtime.h>
+ 
+ #include "iris_core.h"
++#include "iris_hfi_gen2_packet.h"
+ #include "iris_hfi_queue.h"
+ #include "iris_vpu_common.h"
+ 
+@@ -112,6 +113,19 @@
+ int iris_hfi_queue_cmd_write_locked(struct iris_core *core, void *pkt, u32 pkt_size)
+ {
+ 	struct iris_iface_q_info *q_info = &core->command_queue;
++	struct iris_hfi_header *hdr = pkt;
++	u32 off = sizeof(*hdr);
++	int i;
++
++	dev_dbg(core->dev, "hfi tx: sid %u cmd %#x npkt %u\n",
++		hdr->session_id, hdr->header_id, hdr->num_packets);
++	for (i = 0; i < hdr->num_packets && i < 24 && off < hdr->size; i++) {
++		struct iris_hfi_packet *p = (void *)hdr + off;
++
++		dev_dbg(core->dev, "hfi tx pkt[%d]: %#x pay %x %x\n", i, p->type,
++			p->payload[0], p->payload[1]);
++		off += p->size;
++	}
+ 
+ 	if (core->state == IRIS_CORE_ERROR || core->state == IRIS_CORE_DEINIT)
+ 		return -EINVAL;
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
+@@ -149,12 +149,46 @@
+ 	}
+ }
+ 
++/* Debug knob of the encoder bring-up: comma separated list of HFI
++ * property ids whose session set-property is silently skipped. */
++static char *venc_skip;
++module_param(venc_skip, charp, 0644);
++MODULE_PARM_DESC(venc_skip, "comma separated HFI property ids to skip");
++
++static bool iris_hfi_gen2_skip_property(u32 packet_type)
++{
++	const char *p = venc_skip;
++	u32 id;
++	int n;
++
++	if (!p)
++		return false;
++
++	while (*p) {
++		n = 0;
++		if (sscanf(p, "%i%n", &id, &n) != 1)
++			break;
++		if (id == packet_type)
++			return true;
++		p += n;
++		while (*p == ',' || *p == ' ')
++			p++;
++	}
++
++	return false;
++}
++
+ static int iris_hfi_gen2_session_set_property(struct iris_inst *inst, u32 packet_type, u32 flag,
+ 					      u32 plane, u32 payload_type, void *payload,
+ 					      u32 payload_size)
+ {
+ 	struct iris_inst_hfi_gen2 *inst_hfi_gen2 = to_iris_inst_hfi_gen2(inst);
+ 
++	if (iris_hfi_gen2_skip_property(packet_type)) {
++		dev_dbg(inst->core->dev, "hfi skip prop %#x\n", packet_type);
++		return 0;
++	}
++
+ 	iris_hfi_gen2_packet_session_property(inst,
+ 					      packet_type,
+ 					      flag,
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2_response.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2_response.c
+@@ -976,6 +976,9 @@
+ 	struct iris_hfi_header *hdr = (struct iris_hfi_header *)response;
+ 	int ret;
+ 
++	dev_dbg(core->dev, "hfi rx: sid %u cmd %#x\n",
++		hdr->session_id, hdr->header_id);
++
+ 	ret = iris_hfi_gen2_validate_hdr_packet(core, hdr);
+ 	if (ret)
+ 		return iris_hfi_gen2_handle_system_error(core, NULL);
