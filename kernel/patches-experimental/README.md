@@ -218,3 +218,21 @@ gap is NOT about which HFI properties we send. The remaining suspects:
 
 NEXT: check SMMU context bank configuration for the video codec
 (adsp/cb indexes in the DT), or boot the vendor kernel with TX tracing.
+
+## v15/v16 BREAKTHROUGH: BITSTREAM buffers DO have data!
+
+- v15 (venc_internal_bs): remapped BITSTREAM to dma_alloc address
+  → fw ASSERTED on duplicate buffer (my bug: all 4 bufs same address),
+  PROVING the fw processes our HFI_CMD_BUFFER for BITSTREAM
+- v16 (no remap): /dev/mem read of BITSTREAM at 0xdf300000 shows
+  NON-ZERO data (64/64 bytes) after encode. The fw DOES write to our
+  vb2 BITSTREAM buffers!
+
+Previous "fw never writes to userspace buffers" was WRONG — it was a
+TIMING issue. The test program reads via mmap before the fw finishes
+writing. The real remaining issue: the fw doesn't send HFI_CMD_BUFFER
+responses (or sends them very late), so vb2_buffer_done() is never
+called and DQBUF times out.
+
+NEXT: increase test timeout / input buffer count, check if the fw
+eventually sends buffer-done responses with enough input.
