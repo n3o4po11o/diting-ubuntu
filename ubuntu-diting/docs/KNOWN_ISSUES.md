@@ -442,3 +442,28 @@ a nonzero chance of wedging UFS this way. End such a session with a
 deliberate `poweroff` + cold boot before trusting the phone again. If
 a full reflash is ever wanted anyway, a complete r51 owner set is kept
 at `release/r51-images/` on the Mac (boot, vendor_boot, sparse rootfs).
+
+## The -52 kernel no longer boots after the UFS incident; r51 does (2026-11-23, OPEN)
+
+Post-incident (UFS recovered via cold poweroff), with the same healthy
+rootfs and the same boot slot:
+
+- r51 boot images (patches through ~0097): boots reliably (serial at
+  5 s, network/SSH at 10 s).
+- The -52 boot image — including a byte-identical-to-baseline build
+  with NO experimental code and `diting.debug=usb` on the cmdline —
+  does not boot; black screen, no SSH. Before the incident the same
+  -52 vmlinuz booted fine (v25-v30 rounds), so this is a kernel-vs-
+  device-state interaction born in the incident, not a simple build
+  break.
+
+The regression window is r51→-52 (patches 0098-0104: OTG USB host,
+USB disable, camera sensor/actuator + DTS links), or tree drift.
+NOT YET CAPURED: the dying boot's serial/pmsg log. Next diagnostic
+step: boot the v31 debug image and capture the initramfs shell's
+dmesg (or pstore pmsg after a warm reboot) to see where the -52
+kernel dies; then bisect 0098-0104.
+
+Meanwhile the phone daily-runs the r51 boot images (restored
+2026-11-23; rootfs keeps the -52 module tree incl. the v31
+qcom-iris.ko — harmless on r51).
