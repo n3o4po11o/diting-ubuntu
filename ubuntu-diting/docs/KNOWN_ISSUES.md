@@ -214,6 +214,23 @@ mode/stage values, the linear-vs-UBWC VPP path (note the fw's own
 the vendor's full session-init property VALUES (msm_vidc_waipio.c caps
 defaults) and diff them against our TX payload log field by field.
 
+**v7/v8 rounds**: PIPE(=4) was missing from the upstream sm8550 ENC
+caps table (the DEC table has it) and is now injected after every STAGE
+(`venc_pipe`) — verified sent, freeze unchanged. Forcing top OPP + max
+table bandwidth (`venc_maxclk=1`) makes the fw die even earlier. Codec
+id (payload 2 = ENCODE_AVC; the fw's "HEVCEncodeMode" log lines are
+internal naming, not a session mixup) and CSC (vendor sends it only for
+REC709 conversion; not needed in the gst test case) verified correct.
+Everything the firmware can see is now verified. **Converged root-cause
+hypothesis: the fw capabilities handshake parser is broken for
+vpu20_4v** — `fw_caps[PROFILE/LEVEL]=0` is the proof. The vendor builds
+session values FROM the fw-advertised caps; we reply with static
+sm8550-table values that disagree with what this fw advertised, and the
+pipeline dies on the mismatch. Next main task: fix the caps response
+parser (compare iris_hfi_gen2_response.c with the vendor
+venus_hfi_response.c caps parsing for this fw generation), then drop
+the venc_profile/venc_level/venc_pipe crutches.
+
 ### Browser video decoding (VA-API over V4L2)
 
 Firefox and Chromium decode H.264, HEVC and VP9 on the iris decoder through
