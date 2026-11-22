@@ -33,77 +33,154 @@ above (machine driver, DPCM, FEs) and below (macros, codec, amps)
 works — the DSP boots, its PDR services respond, the speaker
 protection firmware loads with calibrated impedance values.
 
-## What has been excluded (all with evidence)
+## Root cause: SPF never starts inside the ADSP (confirmed 2026-11-22)
 
-| Hypothesis | Evidence against |
-| --- | --- |
-| CN voice topology incompatible | Same timeout with the plain 11 KB device-package topology |
-| Missing kernel audio components | cs35l41 ×2 with DSP firmware, wcd938x, all 4 lpass macros probe successfully |
-| 1972 clock poisons the handshake | Same timeout after a time-correct ADSP remoteproc restart |
-| Missing persist/audio calibration | Present on the real unit; protection DSP runs (5.91/7.21 Ω) |
-| Failed userspace services | Zero failed units; all diting audio services active |
-| Userspace holding the FEs | No process holds any /dev/snd node |
+**QRTR service list proves it** — the ADSP (node 5) registers 8
+services (thermal, SLIMbus, subsystem control, CoreSight) but **zero
+audio services** (no APM, no PRM, no audio graph). The GPR device
+`gprsvc:service:2:1` exists only as a kernel-side DT definition; the
+ADSP-side service behind it never starts.
 
-## Root cause hypothesis
+The firmware contains the complete SPF boot chain (strings at known
+offsets):
 
-The CN ADSP firmware (`adsp.mbn` from the CN ROM's firmware_mnt
-partition) has a different SPF-to-GPR registration sequence than the
-EEA firmware the upstream port was developed against. The mainline
-kernel's `q6apm` driver expects the SPF to register GPR port 1 at
-boot; the CN SPF does not (or registers it with a different
-notification the driver doesn't handle).
+| String | File offset | Meaning |
+| --- | --- | --- |
+| `Inside the audio Image Main function` | `0x10395ea` | audio image entry |
+| `Calling AudioPD coremain` | `0x1039621` | audio PD main() |
+| `enabling elite framework` | `0x103963b` | Qualcomm audio framework |
+| `Core Init for audio image done` | `0x1039655` | SPF ready |
+| `Protection Domain Launched` | `0x595acb` | PD lifecycle |
+| `GPR INIT START` | `0x6470b4` | GPR initialization |
+
+"Core Init for audio image done" exists in the binary — the SPF code
+is present. The execution path from `AudioPD coremain` to `Core Init`
+has a conditional branch that skips it on this hardware.
+
+## Excluded hypotheses (10 items, all with evidence)
+
+| # | Hypothesis | Evidence against |
+| --- | --- | --- |
+| 1 | CN ADSP firmware incompatible | EEA firmware: same SPF timeout |
+| 2 | CN voice topology incompatible | Plain 11 KB topology: same timeout |
+| 3 | Missing kernel audio components | cs35l41 ×2 + DSP fw, wcd938x, all 4 macros probe |
+| 4 | 1972 clock poisons handshake | Same timeout after time-correct ADSP restart |
+| 5 | Missing persist/audio calibration | Present on real unit (5.91/7.21 Ω) |
+| 6 | Failed userspace services | Zero failed units |
+| 7 | Userspace holding FEs | No process holds /dev/snd |
+| 8 | DSP library version difference | CN vs EEA: 42 .so files, all md5 identical |
+| 9 | Kernel config regression | Full diff r46 vs r51: 0 audio-related changes |
+| 10 | dma_heap cache corruption | InaccessiblePaths working, strace confirms |
+
+## Audio PD investigation (2026-11-22)
+
+`adsprpcd audiopd` (the userspace daemon that loads the audio PD):
+- `FASTRPC_IOCTL_INIT_CREATE_STATIC` → **succeeds** (PD created)
+- `FASTRPC_IOCTL_INVOKE` × 3 → **all fail** with `0x80000600`
+  (ADSP_EUNSUPPORTED)
+
+The failing handles differ from the successfully opened ones — the PD
+was created but its internal initialization is incomplete. The SPF
+depends on this PD being fully initialized before it registers.
+
+## Firmware binary analysis (2026-11-22)
+
+**CN vs EEA binary diff:**
+- 340,392 differing bytes (1.4% of 23.5 MB)
+- 30,686 contiguous difference regions
+- Largest regions cluster at offset `0x5B0000-0x600000` (likely
+  calibration/configuration data, not code)
+- **Zero difference regions near the SPF init strings** (`0x1039000`):
+  the SPF initialization code is byte-identical between CN and EEA
+
+This means the SPF code is the same; the difference is in data or
+peripheral configuration that the SPF initialization checks before
+starting.
+
+## Next approach: reverse engineering with Python + capstone
+
+### Goal
+
+Find the conditional branch between `"Calling AudioPD coremain"`
+(`0x1039621`) and `"Core Init for audio image done"` (`0x1039655`)
+that skips SPF initialization, and identify what condition it tests.
+
+### Method
+
+```python
+# 1. Disassemble the region around the SPF init strings
+from capstone import Cs, CS_ARCH_HEXAGON, CS_MODE_DEFAULT
+md = Cs(CS_ARCH_HEXAGON, CS_MODE_DEFAULT)
+
+fw = open("/tmp/adsp-cn.mbn", "rb").read()
+
+# 2. Find the function that references these strings
+#    (strings are in a data region; find the code that loads their
+#     addresses into registers — typically PC-relative or absolute)
+
+# 3. Trace execution from the function entry:
+#    - Follow all basic blocks
+#    - At each conditional branch, note:
+#      * what register/condition is tested
+#      * what the taken/not-taken paths do
+#    - Identify which branch leads to "Core Init done" vs skip
+
+# 4. Find what the condition depends on:
+#    - A memory-mapped I/O read (hardware ID / peripheral check)?
+#    - A data value from a calibration/configuration region?
+#    - A response from another ADSP subsystem?
+
+# 5. Compare with the EEA firmware at the same code location
+#    (the code is identical, but the DATA it reads may differ)
+```
+
+### Key offsets for analysis
+
+| What | Offset | Notes |
+| --- | --- | --- |
+| ELF file | 32-bit LSB, Hexagon QDSP6, statically linked | no section headers |
+| SPF entry strings | `0x10395ea`–`0x1039655` | data region |
+| GPR init string | `0x6470b4` | in gpr driver code |
+| PD launched string | `0x595acb` | PD lifecycle |
+| CN/EEA diff clusters | `0x5B0000`–`0x600000` | 1 KB regions, likely config data |
+| SPF code region | identical CN/EEA | no binary diff here |
+
+### Alternative: radare2 quick analysis
+
+```sh
+r2 -a hex /tmp/adsp-cn.mbn
+# search for string references
+> / Calling AudioPD coremain
+# find cross-references to the string
+> axt @ <string_address>
+# disassemble the function
+> pdf @ <xref_address>
+```
+
+### Alternative: Ghidra (requires Hexagon plugin)
+
+Import `/tmp/adsp-cn.mbn`, set language to Hexagon (QDSP6), auto-analyze.
+Search for "Calling AudioPD coremain", find xrefs, trace the code path.
 
 ## Fix approaches (in order of preference)
 
-### Approach 1: EEA ADSP firmware (decisive, ~1 hour)
+### Approach 1: Reverse engineer + patch data (if the condition reads a config value)
 
-Replace the CN `adsp.mbn` with the EEA version and test:
+If the SPF skip is caused by a data value that differs between CN and
+EEA (in the `0x5B0000-0x600000` region), patch the CN firmware's data
+to match EEA. This is a firmware-level fix, applied at the
+`diting-build-firmware` stage.
 
-1. Download the EEA fastboot ROM (OS3.0.5.0.VLFEUXM, ~5 GB).
-2. Extract `firmware_mnt/image/adsp.mdt` + `adsp.b*` from the
-   NON-HLOS.bin (modem partition image contains firmware_mnt).
-3. Squash with `tools/firmware/mdt-squash.py` into a single
-   `adsp.mbn`.
-4. Install as `updates/qcom/sm8475/xiaomi/diting/adsp.mbn`
-   (takes precedence over the extracted CN one).
-5. Reboot and check `dmesg | grep qcom-apm`.
+### Approach 2: Reverse engineer + patch kernel (if the condition is in DT/hardware)
 
-If the timeout disappears → confirmed firmware difference; either
-keep the EEA adsp permanently (may lose CN-specific modem/voice
-features) or proceed to approach 2.
+If the SPF checks a hardware ID or peripheral that we can control from
+the DT, patch the DT to make the check pass.
 
-### Approach 2: Kernel q6apm adaptation (proper fix, 2-5 days)
+### Approach 3: Bypass SPF (workaround)
 
-Reverse-engineer what the CN SPF expects:
-
-1. **Capture GPR traffic**: enable `CONFIG_QCOM_GPR_DEBUG` (or add
-   tracepoints to `q6apm.c`) to log every GPR packet at ADSP boot.
-2. **Compare with ABL**: the Android bootloader successfully talks
-   to the ADSP before Linux starts — use the vendor's DTB
-   (`/proc/device-tree` from an Android boot) to check for
-   different `qcom,glink` or `qcom,apr` properties.
-3. **Check PDR/service registration**: the SPF may require a
-   specific PDR domain notification before it registers its GPR
-   port. The `q6apm` driver's `apm_probe()` may need to subscribe
-   to a service first.
-4. **Port the fix**: likely a small change to `q6apm.c`'s probe
-   sequence (add a service subscription or retry loop) — patch
-   0100.
-
-### Approach 3: Bypass SPF for basic audio (workaround, 3-5 days)
-
-If SPF is fundamentally incompatible, use the ADSP's "raw" audio
-path that doesn't need graph management:
-
-1. The `q6apm_raw` char device (`/sys/kernel/debug/q6apm_raw`)
-   allows direct graph commands without the kernel's graph manager.
-2. A userspace daemon could use this to set up basic PCM playback
-   graphs manually.
-3. This is how the bring-up was originally done (the author's early
-   bring-up notes reference this path).
-
-This is ugly but would give basic speaker output while the proper
-fix is developed.
+Use `q6apm_raw` char device to set up basic PCM graphs directly,
+bypassing the SPF's initialization check. Gives basic speaker output
+while the proper fix is developed.
 
 ## Hardware that works (verified)
 
@@ -116,7 +193,7 @@ fix is developed.
 | Headset jack detection | ✅ input device registered |
 | ADSP remoteproc | ✅ boots, PDR services respond, no crashes |
 | q6apm module | ✅ loads, probes the GPR device |
-| **SPF handshake** | ❌ **timeout — the single blocking point** |
+| **SPF handshake** | ❌ **SPF never starts inside the ADSP** |
 
 ## Related documentation
 
