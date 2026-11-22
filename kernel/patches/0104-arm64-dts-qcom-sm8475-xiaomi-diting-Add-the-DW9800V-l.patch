@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: royka1 <397414+royka1@users.noreply.github.com>
+Date: Sat, 22 Nov 2026 15:00:00 +0100
+Subject: [PATCH] arm64: dts: qcom: sm8475-xiaomi-diting: Add the DW9800V lens actuator
+
+The wide camera module of the CN units carries a DW9800V voice coil at
+0x0c on CCI0 master 1, powered from the WL2866D AVDD2/AVDD1 outputs.
+Instantiate it and reference it from the sensor's lens-focus, so
+libcamera drives the real autofocus.
+
+---
+ arch/arm64/boot/dts/qcom/sm8475-xiaomi-diting.dts | 18 +++++++++++++++++-
+ 1 file changed
+
+--- a/arch/arm64/boot/dts/qcom/sm8475-xiaomi-diting.dts
++++ b/arch/arm64/boot/dts/qcom/sm8475-xiaomi-diting.dts
+@@ -753,9 +753,21 @@
+ 	 * DVDD 1.1 V, reset release, MCLK. C-PHY, three trios, one PLL
+ 	 * setup for every mode (link frequency 1195.83 MHz = the sensor's
+ 	 * 1639.995 MHz array clock * 7 / 96, as on the S5KHP1 module).
+-	 * The lens actuator of this module is a DW9800V at 0x0c, which
+-	 * has no driver yet.
+ 	 */
++	/*
++	 * Lens actuator of the main camera (module data
++	 * diting_sunny_s5khm6_dw9800v_wide_actuator): DW9800V at 0x0c, a
++	 * DW9807-register-compatible SAC2 voice coil, powered from the
++	 * WL2866D AVDD2/AVDD1 outputs of the sensor module.
++	 */
++	cam_wide_lens: actuator@c {
++		compatible = "dongwoon,dw9800v";
++		reg = <0x0c>;
++
++		vdd-supply = <&cam_ldo_avdd2>;
++		vio-supply = <&cam_ldo_avdd1>;
++	};
++
+ 	camera@10 {
+ 		compatible = "samsung,s5khm6";
+ 		reg = <0x10>;
+@@ -773,6 +785,8 @@
+ 		vdda-supply = <&cam_wide_avdd>;
+ 		vddd-supply = <&cam_wide_dvdd>;
+ 
++		lens-focus = <&cam_wide_lens>;
++
+ 		firmware-name = "qcom/sm8475/xiaomi/diting/s5khm6-wide.camregs";
+ 
+ 		orientation = <1>;

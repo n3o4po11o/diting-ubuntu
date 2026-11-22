@@ -1,0 +1,83 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: royka1 <397414+royka1@users.noreply.github.com>
+Date: Sat, 22 Nov 2026 12:00:00 +0100
+Subject: [PATCH] arm64: dts: qcom: sm8475-xiaomi-diting: Use the S5KHM6 wide camera of the CN units
+
+The CN units carry a Sunny module with the Samsung S5KHM6 (chip id
+0x1ad6), not the Semco S5KHP1 of the EEA units: switch the camera@10
+node to the s5khm6 driver with its own register tables
+(s5khm6-wide.camregs, built by the firmware extraction) and the single
+link frequency of the module data. The DW9800V lens actuator of the
+CN module has no driver yet, so drop the AK7314 node and the
+lens-focus reference. The module EEPROM is a GT24P128E here.
+
+---
+ arch/arm64/boot/dts/qcom/sm8475-xiaomi-diting.dts | 32 ++++---------------
+ 1 file changed, 11 insertions(+), 21 deletions(-)
+
+--- a/arch/arm64/boot/dts/qcom/sm8475-xiaomi-diting.dts
++++ b/arch/arm64/boot/dts/qcom/sm8475-xiaomi-diting.dts
+@@ -746,28 +746,19 @@
+ };
+ &cci0_i2c1 {
+ 	/*
+-	 * Rear main: Semco module with a Samsung S5KHP1 (vendor
++	 * Rear main (CN): Sunny module with a Samsung S5KHM6 (vendor
+ 	 * qcom,cam-sensor0: CCI0 master 1, slave 0x20, MCLK2 19.2 MHz,
+ 	 * reset TLMM 126, CSIPHY 2). Power-up order of the module data:
+ 	 * WL2866D AVDD2 (type 0x10), AVDD1 (0xf, 1.8 V I/O), AVDD 2.9 V,
+-	 * DVDD 1.1 V, reset release, MCLK. C-PHY, three trios.
++	 * DVDD 1.1 V, reset release, MCLK. C-PHY, three trios, one PLL
++	 * setup for every mode (link frequency 1195.83 MHz = the sensor's
++	 * 1639.995 MHz array clock * 7 / 96, as on the S5KHP1 module).
++	 * The lens actuator of this module is a DW9800V at 0x0c, which
++	 * has no driver yet.
+ 	 */
+-	/*
+-	 * Lens actuator of the main camera: AK7314 at 0x0c (module data
+-	 * diting_semco_s5khp1_ak7314_wide_actuator: 10-bit position << 6 in
+-	 * register 0, mode register 2, powered from WL2866D AVDD2 and AVDD1).
+-	 */
+-	cam_wide_lens: actuator@c {
+-		compatible = "asahi-kasei,ak7314";
+-		reg = <0x0c>;
+-		vdd-supply = <&cam_ldo_avdd2>;
+-		vio-supply = <&cam_ldo_avdd1>;
+-	};
+-
+ 	camera@10 {
+-		compatible = "samsung,s5khp1";
++		compatible = "samsung,s5khm6";
+ 		reg = <0x10>;
+-		status = "disabled";	/* CN units have the S5KHM6 instead */
+ 
+ 		clocks = <&camcc CAM_CC_MCLK2_CLK>;
+ 		assigned-clocks = <&camcc CAM_CC_MCLK2_CLK>;
+@@ -782,9 +773,7 @@
+ 		vdda-supply = <&cam_wide_avdd>;
+ 		vddd-supply = <&cam_wide_dvdd>;
+ 
+-		lens-focus = <&cam_wide_lens>;
+-
+-		firmware-name = "qcom/sm8475/xiaomi/diting/s5khp1-wide.camregs";
++		firmware-name = "qcom/sm8475/xiaomi/diting/s5khm6-wide.camregs";
+ 
+ 		orientation = <1>;
+ 		rotation = <270>;
+@@ -793,13 +782,14 @@
+ 			cam_wide_ep: endpoint {
+ 				bus-type = <MEDIA_BUS_TYPE_CSI2_CPHY>;
+ 				data-lanes = <1 2 3>;
+-				link-frequencies = /bits/ 64 <848526000 1042384000 1194928000>;
++				link-frequencies = /bits/ 64 <1195830000>;
+ 				remote-endpoint = <&csiphy2_ep>;
+ 			};
+ 		};
+ 	};
+ 
+-	/* Main camera module EEPROM (vendor eeprom0, P24C128F), read-only */
++	/* Main camera module EEPROM (vendor eeprom0: P24C128F on the EEA
++	 * module, GT24P128E on the CN module), read-only */
+ 	eeprom@51 {
+ 		compatible = "puya,p24c128f", "atmel,24c128";
+ 		reg = <0x51>;

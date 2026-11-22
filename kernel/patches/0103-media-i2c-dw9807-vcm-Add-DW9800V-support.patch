@@ -1,0 +1,268 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: royka1 <397414+royka1@users.noreply.github.com>
+Date: Sat, 22 Nov 2026 15:00:00 +0100
+Subject: [PATCH] media: i2c: dw9807-vcm: Add DW9800V support
+
+The DW9800V of the diting CN main camera module is a DW9807-register-
+compatible SAC voice coil at 0x0c, but with its own power-up sequence
+(control register power cycle, SAC2 mode, module SAC timing 0x06=0x80
+0x07=0x62, from the Motorola DW9800V driver and the module's own data),
+no usable status register and supplies from the camera module's WL2866D
+LDOs. Add it as a variant: skip the status poll, manage the supplies in
+runtime PM and run the vendor init after power-on.
+
+---
+ .../bindings/media/i2c/dongwoon,dw9807-vcm.yaml   | 12 +++++++++-
+ drivers/media/i2c/dw9807-vcm.c                    | 98 +++++++++++++++++++---
+ 2 files changed
+
+--- a/drivers/media/i2c/dw9807-vcm.c
++++ b/drivers/media/i2c/dw9807-vcm.c
+@@ -7,6 +7,8 @@
+ #include <linux/iopoll.h>
+ #include <linux/module.h>
+ #include <linux/pm_runtime.h>
++#include <linux/property.h>
++#include <linux/regulator/consumer.h>
+ #include <media/v4l2-ctrls.h>
+ #include <media/v4l2-device.h>
+ 
+@@ -38,12 +40,34 @@
+ 
+ #define MAX_RETRY		10
+ 
++struct dw9807_chip_info {
++	/* The DW9807 flags a busy position write in its status register */
++	bool has_status;
++	/* The DW9800V is powered from the camera module's own LDOs */
++	bool needs_supplies;
++};
++
++static const struct dw9807_chip_info dw9807_info = {
++	.has_status = true,
++};
++
++/* Init sequence of the diting CN module data: control register power
++ * cycle, SAC2 mode, then the module's SAC timing parameters. */
++static const struct dw9807_chip_info dw9800v_info = {
++	.needs_supplies = true,
++};
++
+ struct dw9807_device {
+ 	struct v4l2_ctrl_handler ctrls_vcm;
+ 	struct v4l2_subdev sd;
++	const struct dw9807_chip_info *info;
+ 	u16 current_val;
++	bool powered;
++	struct regulator_bulk_data supplies[2];
+ };
+ 
++static const char * const dw9800v_supply_names[] = { "vdd", "vio" };
++
+ static inline struct dw9807_device *sd_to_dw9807_vcm(
+ 					struct v4l2_subdev *subdev)
+ {
+@@ -75,6 +99,8 @@
+ 
+ static int dw9807_set_dac(struct i2c_client *client, u16 data)
+ {
++	struct v4l2_subdev *sd = i2c_get_clientdata(client);
++	struct dw9807_device *dev_vcm = sd_to_dw9807_vcm(sd);
+ 	const char tx_data[3] = {
+ 		DW9807_MSB_ADDR, ((data >> 8) & 0x03), (data & 0xff)
+ 	};
+@@ -85,16 +111,19 @@
+ 	 * write VCM position. This ensure that we really write the value
+ 	 * into the register
+ 	 */
+-	ret = readx_poll_timeout(dw9807_i2c_check, client, val, val <= 0,
+-			DW9807_CTRL_DELAY_US, MAX_RETRY * DW9807_CTRL_DELAY_US);
++	if (dev_vcm->info->has_status) {
++		ret = readx_poll_timeout(dw9807_i2c_check, client, val,
++				val <= 0, DW9807_CTRL_DELAY_US,
++				MAX_RETRY * DW9807_CTRL_DELAY_US);
++
++		if (ret || val < 0) {
++			if (ret) {
++				dev_warn(&client->dev,
++					"Cannot do the write operation because VCM is busy\n");
++			}
+ 
+-	if (ret || val < 0) {
+-		if (ret) {
+-			dev_warn(&client->dev,
+-				"Cannot do the write operation because VCM is busy\n");
++			return ret ? -EBUSY : val;
+ 		}
+-
+-		return ret ? -EBUSY : val;
+ 	}
+ 
+ 	/* Write VCM position to registers */
+@@ -185,6 +214,22 @@
+ 	if (dw9807_dev == NULL)
+ 		return -ENOMEM;
+ 
++	dw9807_dev->info = device_get_match_data(&client->dev);
++	/* The DW9807 has no separate supplies: it is always powered */
++	dw9807_dev->powered = !dw9807_dev->info->needs_supplies;
++
++	if (dw9807_dev->info->needs_supplies) {
++		unsigned int i;
++
++		for (i = 0; i < ARRAY_SIZE(dw9807_dev->supplies); i++)
++			dw9807_dev->supplies[i].supply = dw9800v_supply_names[i];
++		rval = devm_regulator_bulk_get(&client->dev,
++				ARRAY_SIZE(dw9807_dev->supplies),
++				dw9807_dev->supplies);
++		if (rval)
++			return rval;
++	}
++
+ 	v4l2_i2c_subdev_init(&dw9807_dev->sd, client, &dw9807_ops);
+ 	dw9807_dev->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
+ 	dw9807_dev->sd.internal_ops = &dw9807_int_ops;
+@@ -203,9 +248,14 @@
+ 	if (rval < 0)
+ 		goto err_cleanup;
+ 
+-	pm_runtime_set_active(&client->dev);
+-	pm_runtime_enable(&client->dev);
+-	pm_runtime_idle(&client->dev);
++	if (dw9807_dev->info->needs_supplies) {
++		pm_runtime_enable(&client->dev);
++		pm_runtime_idle(&client->dev);
++	} else {
++		pm_runtime_set_active(&client->dev);
++		pm_runtime_enable(&client->dev);
++		pm_runtime_idle(&client->dev);
++	}
+ 
+ 	return 0;
+ 
+@@ -239,6 +289,9 @@
+ 	const char tx_data[2] = { DW9807_CTL_ADDR, 0x01 };
+ 	int ret, val;
+ 
++	if (!dw9807_dev->powered)
++		return 0;
++
+ 	for (val = dw9807_dev->current_val & ~(DW9807_CTRL_STEPS - 1);
+ 	     val >= 0; val -= DW9807_CTRL_STEPS) {
+ 		ret = dw9807_set_dac(client, val);
+@@ -254,6 +307,38 @@
+ 		return ret;
+ 	}
+ 
++	if (dw9807_dev->info->needs_supplies) {
++		regulator_bulk_disable(ARRAY_SIZE(dw9807_dev->supplies),
++				       dw9807_dev->supplies);
++		dw9807_dev->powered = false;
++	}
++
++	return 0;
++}
++
++/* Power-up sequence of the DW9800V module data: power cycle through the
++ * control register, SAC2 mode, then the module's SAC timing. */
++static int dw9800v_init(struct i2c_client *client)
++{
++	static const u8 seq[][2] = {
++		{ DW9807_CTL_ADDR, 0x01 },
++		{ DW9807_CTL_ADDR, 0x00 },
++		{ DW9807_CTL_ADDR, 0x02 },
++		{ DW9807_MODE_ADDR, 0x80 },
++		{ DW9807_RESONANCE_ADDR, 0x62 },
++	};
++	unsigned int i;
++	int ret;
++
++	for (i = 0; i < ARRAY_SIZE(seq); i++) {
++		if (i == 2)
++			usleep_range(1000, 2000);	/* after the power cycle */
++
++		ret = i2c_master_send(client, seq[i], sizeof(seq[i]));
++		if (ret < 0)
++			return ret;
++	}
++
+ 	return 0;
+ }
+ 
+@@ -271,11 +356,28 @@
+ 	const char tx_data[2] = { DW9807_CTL_ADDR, 0x00 };
+ 	int ret, val;
+ 
+-	/* Power on */
+-	ret = i2c_master_send(client, tx_data, sizeof(tx_data));
+-	if (ret < 0) {
+-		dev_err(&client->dev, "I2C write CTL fail ret = %d\n", ret);
+-		return ret;
++	if (dw9807_dev->info->needs_supplies) {
++		ret = regulator_bulk_enable(ARRAY_SIZE(dw9807_dev->supplies),
++					    dw9807_dev->supplies);
++		if (ret)
++			return ret;
++		usleep_range(5000, 6000);	/* module power-up delays */
++		dw9807_dev->powered = true;
++
++		ret = dw9800v_init(client);
++		if (ret < 0) {
++			dev_err(&client->dev, "I2C write CTL fail ret = %d\n",
++				ret);
++			return ret;
++		}
++	} else {
++		/* Power on */
++		ret = i2c_master_send(client, tx_data, sizeof(tx_data));
++		if (ret < 0) {
++			dev_err(&client->dev, "I2C write CTL fail ret = %d\n",
++				ret);
++			return ret;
++		}
+ 	}
+ 
+ 	for (val = dw9807_dev->current_val % DW9807_CTRL_STEPS;
+@@ -292,9 +394,10 @@
+ }
+ 
+ static const struct of_device_id dw9807_of_table[] = {
+-	{ .compatible = "dongwoon,dw9807-vcm" },
++	{ .compatible = "dongwoon,dw9807-vcm", .data = &dw9807_info },
+ 	/* Compatibility for older firmware, NEVER USE THIS IN FIRMWARE! */
+-	{ .compatible = "dongwoon,dw9807" },
++	{ .compatible = "dongwoon,dw9807", .data = &dw9807_info },
++	{ .compatible = "dongwoon,dw9800v", .data = &dw9800v_info },
+ 	{ /* sentinel */ }
+ };
+ MODULE_DEVICE_TABLE(of, dw9807_of_table);
+@@ -317,5 +420,5 @@
+ module_i2c_driver(dw9807_i2c_driver);
+ 
+ MODULE_AUTHOR("Chiang, Alan");
+-MODULE_DESCRIPTION("DW9807 VCM driver");
++MODULE_DESCRIPTION("DW9807/DW9800V VCM driver");
+ MODULE_LICENSE("GPL v2");
+--- a/Documentation/devicetree/bindings/media/i2c/dongwoon,dw9807-vcm.yaml
++++ b/Documentation/devicetree/bindings/media/i2c/dongwoon,dw9807-vcm.yaml
+@@ -16,11 +16,19 @@
+ 
+ properties:
+   compatible:
+-    const: dongwoon,dw9807-vcm
++    enum:
++      - dongwoon,dw9807-vcm
++      - dongwoon,dw9800v
+ 
+   reg:
+     maxItems: 1
+ 
++  vdd-supply:
++    description: Analogue voltage supply of the DW9800V module.
++
++  vio-supply:
++    description: Digital I/O voltage supply of the DW9800V module.
++
+ required:
+   - compatible
+   - reg
