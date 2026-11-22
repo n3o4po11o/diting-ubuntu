@@ -159,3 +159,24 @@ NEXT: port the vendor metadata buffer queuing for the encoder (queue
 a metadata buffer alongside each output BITSTREAM buffer), or
 investigate whether a specific HFI property enables output delivery
 without metadata.
+
+## DEFINITIVE: firmware never writes to userspace BITSTREAM buffers
+
+Direct memory inspection after encoding: ALL 4 BITSTREAM buffers are
+completely zero (0 nonzero bytes out of 4096 checked per buffer). The
+fw writes encoded data ONLY to internal BIN buffers (fw log:
+"HXU_HACK: SWI programming: 0xdefc4000 size:2888" = BIN area).
+
+Metadata hypothesis disproved (vendor has META_* disabled by default).
+Cache operations disproved (SM8475 is dma-coherent).
+
+The vpu20_4v encoder fw does NOT use the "direct write to userspace
+output buffer" model that the mainline iris driver expects. The vendor
+driver either:
+a) Uses a different output buffer registration mechanism
+b) Copies from internal buffers to userspace in the driver
+c) Has a specific HFI property that enables direct output mode
+
+NEXT: trace the vendor venus_hfi TX for a complete encoder session
+(add TX tracing to the vendor driver on a spare boot) and diff every
+HFI property/command against ours to find the enabling difference.
