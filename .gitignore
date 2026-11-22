@@ -12,3 +12,6 @@
 /ubuntu-diting/work/
 /ubuntu-diting/output/
 __pycache__/
+# Host noise
+.DS_Store
+__pycache__/
