@@ -104,3 +104,22 @@ children audit, drop the venc_* crutches).
   The fw is *starting* to encode but something in the VPP/interframe
   power-collapse path is wrong (this IS the same interframe PC the r55
   incident suspected).
+
+## v10 BREAKTHROUGH (2026-11-23)
+
+**venc_nopc=1 (skip HFI_PROP_INTRA_FRAME_POWER_COLLAPSE) FIXED the
+encoder hang.** The firmware successfully encoded frame 0 (IDR, QP=27)
+and frame 1 (P, QP=29), accepted HFI_CMD_STOP cleanly, and the phone
+survived. Output: "used byte before DestroySession 0x3683e" (223KB).
+
+Remaining issue: gst output file is 0 bytes — the bitstream is produced
+by the firmware but not delivered to userspace (buffer management /
+CAPTURE queue return path). This is a standard V4L2 M2M output buffer
+issue, not a firmware hang.
+
+Root cause chain summary:
+1. fw_caps[PROFILE/LEVEL]=0 → invalid config (v5 fixed with overrides)
+2. Missing PIPE property (v7 fixed with injection)
+3. Missing VBR companion family (v9 fixed with injection)
+4. **Interframe power collapse kills VPP on frame 0** (v10 fixed by
+   skipping HFI_PROP_INTRA_FRAME_POWER_COLLAPSE)
