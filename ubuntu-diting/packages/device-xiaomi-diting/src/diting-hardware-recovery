@@ -26,14 +26,27 @@ check_bt() {
 }
 
 recover_bt() {
-	logger -t "$LOG_TAG" "bluetooth controller down, reloading hci_uart"
+	# Fast path: unbind/rebind the serial device from hci_uart_qca
+	# (~100ms, re-downloads firmware). Fallback: module reload (~5s).
+	logger -t "$LOG_TAG" "bluetooth controller down, recovering"
+	local dev=serial0-0
+	local drv=/sys/bus/serial/drivers/hci_uart_qca
+	if [ -e "$drv/$dev" ]; then
+		echo "$dev" > "$drv/unbind" 2>/dev/null
+		sleep 1
+		echo "$dev" > "$drv/bind" 2>/dev/null
+		sleep 3
+		hciconfig hci0 up 2>/dev/null || true
+		logger -t "$LOG_TAG" "bluetooth recovered (fast rebind)"
+		return
+	fi
+	# Slow fallback
 	rmmod hci_uart btqca 2>/dev/null
 	sleep 2
 	modprobe hci_uart
 	sleep 5
-	# bluetoothd should pick it up automatically; power it on too
 	hciconfig hci0 up 2>/dev/null || true
-	logger -t "$LOG_TAG" "bluetooth recovery done"
+	logger -t "$LOG_TAG" "bluetooth recovered (module reload)"
 }
 
 check_usb() {
