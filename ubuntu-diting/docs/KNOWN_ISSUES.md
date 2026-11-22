@@ -173,6 +173,23 @@ No pstore record survives (on this phone pstore is empty even after a normal
 warm reboot), so debugging needs a live `dmesg -w` over the network with
 `printk_delay`, and the firmware's own log (`HFI_PROP_DEBUG_LOG_LEVEL`).
 
+**r55 incident (2026-11-22)**: a second encoder experiment (patch 0105,
+kept in `hm6-study/0105-DISABLED-encoder-experiment-hangs-boot.patch`)
+re-registered the encoder and added a `qcom_iris.gdsc_sw` module parameter
+to keep the core GDSC in software mode. The phone showed the boot logo and
+went black, USB never came up — **qcom_iris with the experiment hangs the
+system at module load during boot** (proved by a
+`modprobe.blacklist=qcom_iris` one-off boot image, which booted the same
+kernel fine; the first "battery" theory was wrong, the phone had been
+charging all along). Recovery: blacklist boot image from
+`BOOT_MODE=rootfs DITING_ROOT_CMDLINE="... modprobe.blacklist=qcom_iris"
+make boot`, then fastboot a clean image. Lesson for encoder work: never
+register the experimental encoder in a boot kernel; boot with
+`modprobe.blacklist=qcom_iris` and `modprobe qcom_iris <params>` manually
+afterwards with `dmesg -w` running. Never put `printk_delay` on the whole
+boot cmdline either — it makes a hung boot look like a slow one for half
+an hour.
+
 ### Browser video decoding (VA-API over V4L2)
 
 Firefox and Chromium decode H.264, HEVC and VP9 on the iris decoder through
