@@ -123,3 +123,21 @@ Root cause chain summary:
 3. Missing VBR companion family (v9 fixed with injection)
 4. **Interframe power collapse kills VPP on frame 0** (v10 fixed by
    skipping HFI_PROP_INTRA_FRAME_POWER_COLLAPSE)
+
+## v11/v12: output buffer delivery gap
+
+- v11 (buffer-done trace): 0 hits — the firmware NEVER sends
+  HFI_CMD_BUFFER responses after encoding. The 223KB "used byte" from
+  the fw is internal consumption, not output delivered to userspace.
+- v12 (RX packet-type trace): confirmed all 8 RX responses are during
+  session setup only; zero responses after buffer queuing.
+- The IRIS2 encoder firmware apparently uses a different output
+  delivery mechanism than what the mainline driver expects. The vendor
+  driver (msm_vidc) handles this with its own buffer management
+  (msm_vidc_buffer.c: response-based delivery with internal queues and
+  vb2 done callbacks).
+
+REMAINING WORK: port the vendor encoder output buffer delivery path
+(msm_vidc_buffer.c → iris equivalent), or find the specific HFI
+property/command that tells this fw generation to write encoded output
+into the userspace BITSTREAM buffers.
