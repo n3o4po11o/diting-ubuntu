@@ -335,7 +335,17 @@ precedent does not transfer. Keep the RTC read-only (patch 0028 as
 upstream); time persistence is systemd's timesync clock file plus NTP
 after any unclean poweroff.
 
-## CN units: no audio - the ADSP's SPF never answers (2026-11-21, open)
+## CN units: no audio - the ADSP's SPF never answers (2026-11-21, RESOLVED 2026-11-22)
+
+> **Resolved 2026-11-22:** the SPF never initialized because the DT's
+> `qcom,vmids = <LPASS ADSP_HEAP>` on the fastrpc node made the kernel
+> `qcom_scm_assign_mem()` the audio PD's 12 MiB remote-heap pool away
+> from HLOS; subsequent coherent allocations from that pool aborted in
+> `dcache_clean_poc()` (synchronous external abort, seen in dmesg with
+> PID adsprpcd) and the audio PD's heap stayed half-broken. Removing
+> `qcom,vmids` (patch 0045) fixed it; also required: `alsa-ucm-conf`
+> installed (UCM2 resolution) and the UCM EnableSequence switches.
+> Speaker playback verified. Full story: AUDIO-SPF.md, "RESOLUTION".
 
 On the CN unit (OS3.3.3.0.VLFCNXM-extracted firmware) there is no sound at
 all: every playback open fails and WirePlumber only creates a dummy sink.
