@@ -71,11 +71,18 @@ actuator`) — **driven since kernel r54** (patches 0103/0104): a variant
 
 Recording stutters because the whole imaging path is software: the
 libcamera simple pipeline debayers and runs 3A on the CPU, and the
-video encode is software too (only the Iris **decoder** has a driver;
-the Venus encoder of SM8475 would need the qcom-venus driver at the
-same MMIO the Iris driver occupies). Sensor-side timing is not the
-limit (1080p120 works). Fixing recording properly means a hardware ISP
-or at least a hardware encoder — both are separate projects.
+video encode is software (the iris encoder driver exists but the
+firmware does not yet deliver output to userspace — see KNOWN_ISSUES).
+Sensor-side timing is not the limit (1080p120 works).
+
+**Encoder bring-up status (2026-11-23)**: the firmware successfully
+encodes H.264 frames (2 frames verified by fw logs, 223KB produced)
+after four root-cause fixes (PROFILE/LEVEL forcing, PIPE injection,
+VBR companion family, interframe power-collapse disable). The
+remaining gap is output buffer delivery: the fw writes only to
+internal BIN buffers, never to userspace BITSTREAM buffers. See
+KNOWN_ISSUES for the full campaign log (v1-v13) and the plan for
+the definitive vendor TX trace comparison.
 
 If the first captures fail, check `dmesg` for the chip id the probe
 reads (the driver logs it on mismatch) and for CSIPHY C-PHY errors;

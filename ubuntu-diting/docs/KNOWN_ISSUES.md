@@ -164,72 +164,45 @@ in `docs/BRINGUP_STATUS.md`.
   boot (harmless so far).
 - `systemd-networkd` runs next to NetworkManager.
 
-### Video encoder resets the phone (SM8475 iris, r35)
+### Video encoder (SM8475 iris) — firmware works, output delivery gap
 
-The hardware encoder is disabled in r36 (only `/dev/video0`, the decoder, is
-registered). With the encoder enabled, starting the raw input port hangs the
-video firmware and the next command the driver writes resets the whole SoC.
-No pstore record survives (on this phone pstore is empty even after a normal
-warm reboot), so debugging needs a live `dmesg -w` over the network with
-`printk_delay`, and the firmware's own log (`HFI_PROP_DEBUG_LOG_LEVEL`).
+Complete bring-up campaign (v1-v13, 2026-11-23). The encoder went from
+"freezes the SoC at session start" to "firmware successfully encodes
+H.264 frames" through four root-cause fixes, all in the experiment patch
+(kernel/patches-experimental/0106-*):
 
-**r55 incident (2026-11-22)**: a second encoder experiment (patch 0105,
-kept in `hm6-study/0105-DISABLED-encoder-experiment-hangs-boot.patch`)
-re-registered the encoder and added a `qcom_iris.gdsc_sw` module parameter
-to keep the core GDSC in software mode. The phone showed the boot logo and
-went black, USB never came up — **qcom_iris with the experiment hangs the
-system at module load during boot** (proved by a
-`modprobe.blacklist=qcom_iris` one-off boot image, which booted the same
-kernel fine; the first "battery" theory was wrong, the phone had been
-charging all along). Recovery: blacklist boot image from
-`BOOT_MODE=rootfs DITING_ROOT_CMDLINE="... modprobe.blacklist=qcom_iris"
-make boot`, then fastboot a clean image. Lesson for encoder work: never
-register the experimental encoder in a boot kernel; boot with
-`modprobe.blacklist=qcom_iris` and `modprobe qcom_iris <params>` manually
-afterwards with `dmesg -w` running. Never put `printk_delay` on the whole
-boot cmdline either — it makes a hung boot look like a slow one for half
-an hour.
+1. **fw_caps[PROFILE/LEVEL]=0** — the fw caps parser doesn't populate
+   them; forced to H.264 High(4)/level 5.0(14) via module params
+   (venc_profile/venc_level).
+2. **PIPE missing** — the upstream sm8550 ENC caps table has no PIPE
+   entry; injected HFI_PROP_PIPE=4 after every STAGE (venc_pipe).
+3. **VBR companion family missing** — 9 properties the vendor sends
+   alongside HFI_PROP_RATE_CONTROL; injected with waipio defaults
+   (venc_vbrfamily).
+4. **⭐ INTRA_FRAME_POWER_COLLAPSE kills VPP on frame 0** — disabling
+   it (venc_nopc=1) was THE breakthrough; the fw log showed "PC refcount
+   0 and on is_needed 1" exactly where it died with it enabled.
 
-**Encoder death ladder (2026-11-23, experiment v6 in
-kernel/patches-experimental/)**: full HFI tracing narrowed the r35 hang
-step by step. The vpu20_4v firmware leaves `fw_caps[PROFILE/LEVEL]` at 0
-(mainline caps parser doesn't populate them; the V4L2 ctrl defaults
-H.264 High=4 / level 5.0=14 numerically equal the HFI enum values).
-Baseline dies at session START; skipping PROFILE/LEVEL passes START;
-forcing 4/14 (verified in the HFI payload) dies after ALL buffers are
-queued — the firmware now hangs attempting the first encoded frame.
-Geometry, strides, color format (NV12 linear = 1) and every buffer
-descriptor verified sane against the vendor driver.
+After fix 4, the firmware encodes frame 0 (IDR, QP=27) and frame 1 (P,
+QP=29), accepts HFI_CMD_STOP cleanly, reports "used byte before
+DestroySession 0x3683e" (223KB). **The phone survives.**
 
-**v6: the firmware's own log ported and working** (venc_fwlog=1 sends
-the vendor `HFI_PROP_DEBUG_CONFIG`/`DEBUG_LOG_LEVEL` after sys_init; the
-mainline `flush_debug_queue` prints them). The firmware's last words at
-the freeze (enc-exp9.log): it receives the final VPSS buffer, accepts
-`HFI_CMD_START`, creates the Worker/VPPSG/VSPAP/Reorder components,
-sends the **START success response** — and dies the moment the encode
-pipeline actually runs (VPPSG touching the first RAW frame). The
-remaining suspect class is hardware pipeline configuration: VPP work
-mode/stage values, the linear-vs-UBWC VPP path (note the fw's own
-`vzip_20_enable 1` line), or encode-path clocks. Next step: enumerate
-the vendor's full session-init property VALUES (msm_vidc_waipio.c caps
-defaults) and diff them against our TX payload log field by field.
+**Remaining gap**: the firmware writes encoded data ONLY to internal
+BIN buffers; ALL 4 userspace BITSTREAM buffers remain completely zero
+(direct memory inspection). No HFI_CMD_BUFFER responses are ever sent
+through the message queue (272 interrupts all from debug queue writes).
+Every simple difference has been eliminated: metadata (disabled by
+default), cache ops (dma-coherent), buffer flags/ports/sizes/ordering
+(all verified identical to vendor), MIN_OUTPUT_COUNT (injected, no
+change).
 
-**v7/v8 rounds**: PIPE(=4) was missing from the upstream sm8550 ENC
-caps table (the DEC table has it) and is now injected after every STAGE
-(`venc_pipe`) — verified sent, freeze unchanged. Forcing top OPP + max
-table bandwidth (`venc_maxclk=1`) makes the fw die even earlier. Codec
-id (payload 2 = ENCODE_AVC; the fw's "HEVCEncodeMode" log lines are
-internal naming, not a session mixup) and CSC (vendor sends it only for
-REC709 conversion; not needed in the gst test case) verified correct.
-Everything the firmware can see is now verified. **Converged root-cause
-hypothesis: the fw capabilities handshake parser is broken for
-vpu20_4v** — `fw_caps[PROFILE/LEVEL]=0` is the proof. The vendor builds
-session values FROM the fw-advertised caps; we reply with static
-sm8550-table values that disagree with what this fw advertised, and the
-pipeline dies on the mismatch. Next main task: fix the caps response
-parser (compare iris_hfi_gen2_response.c with the vendor
-venus_hfi_response.c caps parsing for this fw generation), then drop
-the venc_profile/venc_level/venc_pipe crutches.
+**Next step**: boot the vendor kernel (msm-5.10 + waipio video driver),
+add TX tracing, capture one complete encoder session, and diff every
+HFI command/property/value against the mainline trace to find the
+enabling difference conclusively.
+
+The experiment kernel must ONLY be booted with
+`modprobe.blacklist=qcom_iris` on the cmdline (see r55 incident below).
 
 ### Browser video decoding (VA-API over V4L2)
 
