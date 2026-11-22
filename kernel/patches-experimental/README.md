@@ -236,3 +236,25 @@ called and DQBUF times out.
 
 NEXT: increase test timeout / input buffer count, check if the fw
 eventually sends buffer-done responses with enough input.
+
+## Session end summary (v15-v17, deep night)
+
+Three crucial discoveries this round:
+
+1. **BITSTREAM buffers DO get data** (via /dev/mem: 64/64 bytes nonzero).
+   Previous "fw never writes" was a timing artifact — the fw writes
+   LATER than the test program reads.
+
+2. **Input buffer return works** (hfi buf done type 0x2 × 6 entries).
+   The fw sends HFI_CMD_BUFFER for consumed input buffers. Output
+   (type 0x1 BITSTREAM) return never fires — the missing piece.
+
+3. **DRAIN is sent** (HFI_CMD_DRAIN 0x1000007 confirmed in TX trace
+   after ENCODER_CMD STOP). But the fw doesn't respond with buffered
+   output. The encoding is extremely slow (~37s to first frame from
+   session start) — the DRAIN might arrive before any encoding happens.
+
+Remaining: increase wait time before DRAIN to 30+ seconds (to match the
+fw's encoding latency), or investigate why encoding takes 37 seconds
+(normal would be milliseconds). The slow start might indicate a power
+state or clock ramp-up issue.
