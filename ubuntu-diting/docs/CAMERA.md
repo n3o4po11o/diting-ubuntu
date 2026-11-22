@@ -4,15 +4,16 @@
 
 | Camera | Sensor | Driver | camregs | Status |
 | --- | --- | --- | --- | --- |
-| Wide (main) | Samsung **S5KHM6** | none | ✅ built by firmware extraction | ❌ needs a new driver |
+| Wide (main) | Samsung **S5KHM6** | ✅ `s5khm6` (patches 0100-0102) | ✅ built by firmware extraction | 🔶 built, needs on-device verification |
 | Ultra-wide | Sony **S5K4H7** | ✅ `s5k4h7` (mainline) | ✅ built by firmware extraction | ✅ should work |
 | Front | Sony **IMX596** | none | not extracted | ❌ needs a driver |
 | Macro | GalaxyCore **GC02M1** | none | not extracted | ❌ needs a driver |
 
 The CN and EEA units carry different wide camera sensors: EEA has the
-S5KHP1, CN has the S5KHM6 (kernel r52 disables the s5khp1 DT node on
-CN; the firmware extraction builds `s5khm6-wide.camregs` from the CN
-vendor's chromatix module, not `s5khp1-wide.camregs`).
+S5KHP1 (Semco module, AK7314 actuator), CN has the S5KHM6 (Sunny
+module, DW9800V actuator). Since kernel r53 the `camera@10` node is a
+`samsung,s5khm6` (the firmware extraction builds `s5khm6-wide.camregs`
+from the CN vendor's chromatix module either way).
 
 ## What works now
 
@@ -24,29 +25,62 @@ vendor's chromatix module, not `s5khp1-wide.camregs`).
 - **Video decode/encode**: independent of cameras; the IRIS2 codec
   works.
 
-## HM6 (wide) driver roadmap
+## HM6 (wide) driver — written, verification pending
 
-The S5KHM6 driver does not exist in mainline. To write one:
+The `s5khm6` driver (kernel patches 0100-0102) is a sibling of the
+s5khp1 one: register tables from
+`/usr/lib/firmware/qcom/sm8475/xiaomi/diting/s5khm6-wide.camregs`
+(init + 8 mode tables; the driver exposes 6 of them).
 
-1. **Reference drivers**: `drivers/media/i2c/s5khp1/` (this kernel,
-   patch 0068+) and `s5kjn1/` (mainline) are the closest Samsung
-   sensors with camregs-style register tables.
-2. **Register tables**: already built — `/usr/lib/firmware/qcom/
-   sm8475/xiaomi/diting/s5khm6-wide.camregs` (from
-   `com.qti.sensormodule.diting_sunny_s5khm6_wide.bin` via
-   `chromatix-to-camregs.py`; includes init, 4 resolution modes with
-   DSI DSC commands).
-3. **DT node**: replace the disabled `camera@10` (s5khp1) with a
-   `samsung,s5khm6` node at the same I2C address (0x10), same MCLK,
-   reset GPIO, supplies and CSIPHY endpoint. The link frequencies
-   are in the camregs mode tables.
-4. **Actuator**: the wide lens has an actuator (`cam_wide_lens`,
-   AK7314). The driver needs to expose the V4L2 focus controls; the
-   register values are in the DT node.
-5. **Flash**: not wired on this unit.
+Facts baked into the driver, cross-checked against the CN module
+binary (`com.qti.sensormodule.diting_sunny_s5khm6_wide.bin`) and the
+Motorola `mot_vicky_s5khm6` MTK driver (same Samsung reference
+settings):
 
-Estimated effort: 2-3 days for basic capture (no autofocus, one
-mode), another 2-3 for full resolution switching and focus.
+- **Chip id**: `0x1ad6` (the module bin's sensorDriverData carries
+  0x1ad6/0xffff; Motorola's `MOT_VICKY_S5KHM6_SENSOR_ID`).
+- **Power-up order** (module bin powerSetting): WL2866D AVDD2 → AVDD1
+  → AVDD 2.9 V → DVDD 1.1 V → reset release → MCLK 19.2 MHz — the
+  order the s5khp1 driver already implements.
+- **One PLL setup for every mode** (0x0300-0x0312 identical in all 8
+  mode tables), so a single link frequency and pixel clock; frame
+  rates change only via HTS/VTS. Pixel clock 1639.995 MHz
+  (Motorola's driver hardcodes the same pclk; its 0x0306/0x0304 =
+  239/4 vs our 224/3 differs exactly by the 24/19.2 MCLK ratio).
+  Link frequency 1195.83 MHz = pixel clock × 7/96 (the same relation
+  the s5khp1 module data carries; symbol rate 2391.66 Msym/s, in the
+  CSIPHY 2.5G bucket).
+- **Modes**: 12000x9000@8, 4000x3000@30 (3×3 Nonacell binning),
+  4000x2252@60, 1920x1080@120, 1920x1080@240, 1280x720@360.
+- **Register map**: CCS-like as the HP1 (16-bit regs; exposure 0x0202,
+  gain 0x0204, VTS 0x0340, HTS 0x0342); the control registers are
+  reachable on page 0x4000 (0xfcfc), which the mode tables switch to
+  at their end — same as the HP1 driver's explicit page write.
+- **Actuator**: DW9800V at 0x0c (`diting_sunny_s5khm6_dw9800v_wide_
+actuator`) — **driven since kernel r54** (patches 0103/0104): a variant
+  of the dw9807-vcm driver (same position registers 0x03/0x04 and
+  control 0x02; no usable status register; supplies from the WL2866D
+  outputs; init = control-register power cycle → SAC2 mode with the
+  module timing 0x06=0x80/0x07=0x62, from the Motorola DW9800V driver).
+  `focus_absolute` 0..1023 verified on the phone; libcamera drives the
+  real contrast autofocus through the sensor's `lens-focus` phandle.
+- **EEPROM**: GT24P128E at 0x51 (24c128-compatible, covered by the
+  existing eeprom@51 node).
+
+## Video recording performance
+
+Recording stutters because the whole imaging path is software: the
+libcamera simple pipeline debayers and runs 3A on the CPU, and the
+video encode is software too (only the Iris **decoder** has a driver;
+the Venus encoder of SM8475 would need the qcom-venus driver at the
+same MMIO the Iris driver occupies). Sensor-side timing is not the
+limit (1080p120 works). Fixing recording properly means a hardware ISP
+or at least a hardware encoder — both are separate projects.
+
+If the first captures fail, check `dmesg` for the chip id the probe
+reads (the driver logs it on mismatch) and for CSIPHY C-PHY errors;
+the Bayer order (GRBG assumed, as the HP1) and the default readout
+orientation may need a flip.
 
 ## IMX596 (front) and GC02M1 (macro) roadmap
 
