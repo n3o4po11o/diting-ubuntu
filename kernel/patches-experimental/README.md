@@ -52,3 +52,19 @@ directory is ever built into a kernel image.
   port/fix the caps response parser (compare iris_hfi_gen2_response.c
   caps parsing with vendor venus_hfi_response.c for this fw generation),
   then drop the venc_profile/level/pipe crutches.
+
+## Mechanism correction (after v8, offline)
+
+- The "broken caps parser" theory was WRONG: there is no fw-driven caps
+  overwrite for enc — `iris_hfi_gen2_session_set_config_params` calls the
+  set_* helpers which read fw_caps directly; the zeros in the TX trace
+  were gst setting profile/level ctrls to their V4L2 defaults (baseline
+  =0, level 1.0=0), which the driver passes through untranslated.
+  Vendor HFI enums (hfi_property.h): AVC baseline=0/high=4, RC VBR=0 —
+  numerically ALIGNED with V4L2, so the passthrough values are legal;
+  the off-by-enum theory is disproven too.
+- Definitive next move: port the vendor HFI_PROP_CAPABILITY query
+  (driver asks the fw for min/max/step of PROFILE/LEVEL/PIPE/... and
+  builds the session from the ANSWER; mainline never queries at all)
+  and dump what this fw advertises, then drive the session strictly by
+  those values.
