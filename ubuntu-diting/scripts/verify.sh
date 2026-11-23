@@ -63,6 +63,9 @@ if [ -f "$rimg" ]; then
 	dpkg_arch="$(awk '/^Package: dpkg$/{f=1;next} f&&/^Package:/{f=0} f&&/^Architecture:/{print;exit}' <<<"$st")"
 	t "dpkg architecture arm64 (dpkg itself)" test "$dpkg_arch" = "Architecture: arm64"
 	t "systemd-sysv installed (systemd is init)" grep -qx 'Package: systemd-sysv' <<<"$st"
+	# the initramfs fsck hook copies these from the rootfs; a missing
+	# e2fsprogs here means the next initramfs silently loses root fsck
+	t "e2fsprogs installed (root fsck binaries source)" grep -qx 'Package: e2fsprogs' <<<"$st"
 	t "local linux-image-$KERNEL_RELEASE installed" grep -qx "Package: linux-image-$KERNEL_RELEASE" <<<"$st"
 	t "device-xiaomi-diting installed" grep -qx 'Package: device-xiaomi-diting' <<<"$st"
 	t "no generic Ubuntu kernel installed" sh -c '! grep -q "^Package: linux-image-.*-generic"' <<<"$st"
