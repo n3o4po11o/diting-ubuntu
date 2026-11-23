@@ -2,7 +2,8 @@
 """EXPERIMENT (never committed): firmware log + HFI TX/RX tracing.
 
 Applies on top of the clean patch series. Usage:
-    python3 exp-fwlog-trace.py <iris_driver_dir>
+    python3 exp-fwlog-trace.py <iris_driver_dir | kernel_src_dir>
+(exp-build.sh passes the kernel source root, like for every other script)
 
 - adds iris_hfi_gen2_packet_sys_debug_config() and sends it after sys_init
   when the module parameter fwlog_level is non-zero (default 0x2b)
@@ -12,6 +13,8 @@ Enable with:  echo module qcom_iris +p > /sys/kernel/debug/dynamic_debug/control
 import sys, os
 
 d = sys.argv[1]
+if not os.path.exists(os.path.join(d, "iris_hfi_gen2_packet.c")):
+    d = os.path.join(d, "drivers/media/platform/qcom/iris")
 
 
 def edit(name, old, new, tag):
