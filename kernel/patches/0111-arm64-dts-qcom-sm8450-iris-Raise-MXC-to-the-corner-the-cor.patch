@@ -1,0 +1,39 @@
+From: f <f@f>
+Date: Mon, 23 Nov 2026 20:00:00 +0800
+Subject: [PATCH] arm64: dts: qcom: sm8450: iris: Raise MXC to the corner the core needs
+
+The iris OPP table of SM8450 gives the MXC rail SVS at 366 MHz and
+SVS_L1 at 444 MHz (measured on hardware: the first required-opp lands
+on MXC, the second on MMCX). The downstream videocc driver of the same
+platform requires SVS_L1 up to a 1098 MHz and NOMINAL up to a 1332 MHz
+video_cc_mvs0_clk_src, i.e. for the 366 and 444 MHz core rates, on
+both MXC and MMCX (videocc-waipio.c rate_max of video_cc_mvs0_clk_src).
+
+With MXC one corner low the video core runs out of spec at its two
+top rates. Decoding happened to survive it; starting an encode session
+takes the 444 MHz point and reset the whole SoC the moment the
+firmware touched the VPP.
+
+Raise the first required-opp of both points: SVS_L1 at 366 MHz and
+NOMINAL at 444 MHz, matching the downstream requirement.
+
+Local Diting bring-up change, not submitted upstream.
+---
+--- a/arch/arm64/boot/dts/qcom/sm8450.dtsi
++++ b/arch/arm64/boot/dts/qcom/sm8450.dtsi
+@@ -3322,13 +3322,13 @@
+ 
+ 				opp-366000000 {
+ 					opp-hz = /bits/ 64 <366000000>;
+-					required-opps = <&rpmhpd_opp_svs>,
++					required-opps = <&rpmhpd_opp_svs_l1>,
+ 							<&rpmhpd_opp_svs_l1>;
+ 				};
+ 
+ 				opp-444000000 {
+ 					opp-hz = /bits/ 64 <444000000>;
+-					required-opps = <&rpmhpd_opp_svs_l1>,
++					required-opps = <&rpmhpd_opp_nom>,
+ 							<&rpmhpd_opp_nom>;
+ 				};
+ 			};
