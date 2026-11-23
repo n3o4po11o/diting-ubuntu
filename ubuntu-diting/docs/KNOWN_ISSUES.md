@@ -164,14 +164,17 @@ in `docs/BRINGUP_STATUS.md`.
   boot (harmless so far).
 - `systemd-networkd` runs next to NetworkManager.
 
-### Video encoder resets the phone (SM8475 iris, r35)
+### Video encoder: not available (SM8475 iris)
 
-The hardware encoder is disabled in r36 (only `/dev/video0`, the decoder, is
-registered). With the encoder enabled, starting the raw input port hangs the
-video firmware and the next command the driver writes resets the whole SoC.
-No pstore record survives (on this phone pstore is empty even after a normal
-warm reboot), so debugging needs a live `dmesg -w` over the network with
-`printk_delay`, and the firmware's own log (`HFI_PROP_DEBUG_LOG_LEVEL`).
+The hardware encoder is disabled since r36 (only the decoder is registered).
+With it enabled, the firmware accepts the whole session and the SoC resets
+when the first frame reaches the VPP (in r35 the START of the raw port hung
+the firmware first). No pstore record survives (on this phone pstore is
+empty even after a normal warm reboot), so debugging needs a live `dmesg -w`
+over the network and the firmware's own log
+(`HFI_PROP_DEBUG_LOG_LEVEL`). Any application could trigger the reset, which
+is why the node stays unregistered. Status, everything tried and the plan:
+`kernel/VIDEO-ENCODER.md`.
 
 ### Browser video decoding (VA-API over V4L2)
 
@@ -432,5 +435,28 @@ Raised MXC corner (patch 0111): the iris OPP table gave MXC svs at 366 MHz
 and svs_l1 at 444 MHz where the downstream videocc driver requires
 svs_l1 and nom (first required-opp lands on MXC, measured). Raised; it
 was out of spec for decoding too at those points, but it is not the
-cause of the encoder reset. See kernel/patches-experimental/README.md for
-the experiment log and the next step (ARP stream via the non-pixel SID).
+cause of the encoder reset.
+
+Also tested, each with the same reset: the ARP buffer in the downstream
+non-pixel address pool, SID 0x2184 translated through the iris context bank
+(the downstream ARP routing), the video core reset, hardware clock control
+on the video clock source, and 640x480 instead of 1280x1104. Everything is
+in `kernel/VIDEO-ENCODER.md` (status, routes, sources, plan); the
+chronological log is `kernel/patches-experimental/README.md`.
+
+### An experimental kernel can be built and shipped as "formal" (2026-11-24)
+
+`scripts/prepare-kernel.sh` skips the re-export while
+`work/kernel-src/.diting-stamp` matches the patch series, and the stamp only
+covers `kernel/patches`. Once an experiment has edited a file in the tree,
+every later `make kernel` rebuilds that edit, with no check failing: the
+kernel package built on the build server on 2026-11-23 22:56 carried the
+ARP/SMMU experiment code in `qcom-iris.ko` although `make verify` passed
+(unreachable code with the encoder unregistered, and the boot images hold no
+modules, so nothing on the phone was affected).
+
+Build experiments with `kernel/patches-experimental/exp-build.sh`: it always
+re-exports first, refuses to build unless the tree is the formal series,
+moves experimental packages and images to `output/experimental/<tag>`, and
+removes the stamp afterwards so that the next `make kernel` re-exports.
+The formal package was rebuilt clean on 2026-11-24.

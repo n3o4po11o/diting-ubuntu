@@ -21,8 +21,9 @@ vendor's chromatix module, not `s5khp1-wide.camregs`).
   or `libcamera-hello`. If it appears but the image is wrong, the
   register tables may need tuning (they come from the vendor's
   chromatix binary, converted by `chromatix-to-camregs.py`).
-- **Video decode/encode**: independent of cameras; the IRIS2 codec
-  works.
+- **Video**: independent of the cameras. The IRIS2 decoder works; the
+  hardware encoder does not (`docs/KNOWN_ISSUES.md`,
+  `../../kernel/VIDEO-ENCODER.md`).
 
 ## HM6 (wide) driver roadmap
 

@@ -1,7 +1,26 @@
-# Experimental patches — NOT in the build
+# Experimental patches — NOT in the formal build
 
-prepare-kernel.sh applies only `kernel/patches/*.patch`; nothing in this
-directory is ever built into a kernel image.
+`prepare-kernel.sh` applies only `kernel/patches/*.patch`. Nothing here is
+built into a formal image; it is built only on purpose, with `exp-build.sh`,
+into a test image that blacklists the iris module.
+
+Consolidated status, routes tried, sources and plan: `../VIDEO-ENCODER.md`.
+This file is the chronological log of both campaigns, oldest first.
+
+| File | What |
+| --- | --- |
+| `EXPERIMENT-0105 … 0110`, `0112` | the encoder series of the second campaign |
+| `0107-EXPERIMENT-Skip-interframe-power-collapse…` | **retired**: it disables the VPP for decoding too |
+| `UPSTREAM-*` | upstream iris fixes after v7.2.10 that apply to our base; not yet tested on the device |
+| `exp-build.sh` | `exp-build.sh formal`, or `exp-build.sh TAG -p … -s …` (see its header) |
+| `exp-fwlog-trace.py` | firmware debug log and HFI TX/RX trace |
+| `exp-arp-reset.py`, `exp-arp-sid-mask.py`, `exp-smmu-probe.py`, `exp-core-reset.py`, `exp-hwclkctrl.py` | the hardware experiments V6–V16, kept for the record |
+| `v30_all_fixes.py`, `v31_all_fixes.py` | first campaign; never build them again |
+
+The log starts with the first campaign's module patch
+(`0106-EXPERIMENT-media-iris-encoder-session-tracing.patch`, since removed;
+knobs `venc_skip`, `venc_profile`, `venc_level`), so the first entries are
+kept as written:
 
 - `0106-EXPERIMENT-media-iris-encoder-session-tracing.patch` — the iris
   encoder bring-up experiment. Boots only with

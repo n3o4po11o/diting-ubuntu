@@ -9,6 +9,8 @@ with a device patch series.
 - **Build it yourself:** [ubuntu-diting/README.md](ubuntu-diting/README.md).
 - **Hardware status:** [docs/BRINGUP_STATUS.md](docs/BRINGUP_STATUS.md),
   [ubuntu-diting/docs/KNOWN_ISSUES.md](ubuntu-diting/docs/KNOWN_ISSUES.md).
+- **Video codec:** the decoder works, the hardware encoder does not; status,
+  everything tried and the plan: [kernel/VIDEO-ENCODER.md](kernel/VIDEO-ENCODER.md).
 - **Kernel tree** (v7.2.10 + the patches in `kernel/patches` as commits):
   https://github.com/royka1/linux-diting
 

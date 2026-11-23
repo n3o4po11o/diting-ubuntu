@@ -5,6 +5,20 @@ mainline iris port, 2026-11-23. Sources on the build server
 (`~/k50ultra/vendor-kernels/`), key trees mirrored on the Mac
 (`video-study/`).
 
+**Status 2026-11-24 — read with `VIDEO-ENCODER.md`.** Three statements below
+did not survive the hardware tests of the second campaign:
+
+- "Encoding works on mainline anyway" (context bank section) is wrong: the
+  encoder resets the SoC on frame 0, and routing the ARP buffer through SID
+  0x2184 did not change that.
+- The subscribe/delivery choreography was implemented (EXPERIMENT-0108); the
+  firmware accepts it, the encoder still resets.
+- `HFI_PROP_PROFILE`/`HFI_PROP_LEVEL` are still sent as 0/0: the sender is the
+  control handler `iris_set_profile()`, which EXPERIMENT-0105 does not touch.
+
+What stands: the DT and context-bank facts, the vendor command sequence,
+and the buffer-size formulas.
+
 ## Sources
 
 | Source | What it is | Notes |
@@ -47,8 +61,11 @@ Non-secure session:
 | BIN/COMV/NON_COMV/LINE/PERSIST/META | `venus_ns` | |
 
 Vendor routes ARP internal buffers through a *secure* context bank even for
-non-secure sessions. Encoding works on mainline anyway, so this is a
-fidelity gap, not the blocker.
+non-secure sessions. Whether that matters on mainline was tested on
+2026-11-23: with SID 0x2184 translated through the iris context bank and the
+buffer in the non-pixel pool, the encoder resets at the same point.
+
+The stock node itself is in `video-reference/stock-diting-venus-node.dts`.
 
 ## THE FINDING: encoder streamon choreography
 
