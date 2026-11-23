@@ -4,3 +4,7 @@
 MODULES=list
 COMPRESS=zstd
 BUSYBOX=y
+# The root fstab entry is a LABEL the build server cannot resolve, so the
+# fsck hook would skip e2fsck and the initramfs would die at boot waiting
+# for a root fsck it cannot run. Name the type explicitly.
+FSTYPE=ext4
