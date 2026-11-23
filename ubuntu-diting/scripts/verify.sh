@@ -85,6 +85,30 @@ for b in "$OUT"/boot/boot-diting-ubuntu-*.img; do
 	else
 		bad "boot pair $(basename "$b") (see output/logs/verify-$(basename "$b").txt)"
 	fi
+	# Ramdisk content: the root fstab demands a pass-1 fsck and the boot
+	# relies on the serial rescue hook, so both must be inside the
+	# vendor_boot ramdisk. This catches the build flake where the fsck
+	# hook cannot resolve the LABEL=diting-root fstab entry and silently
+	# ships an initramfs that dies waiting for a root fsck it cannot run.
+	if [ -f "$v" ]; then
+		rdlist="$OUT/logs/ramdisk-list-$(basename "$b").txt"
+		tmp="$(mktemp -d)"
+		if python3 - "$v" "$tmp/rd.zst" <<'PY' 2>/dev/null && zstd -dc "$tmp/rd.zst" 2>/dev/null | cpio -it > "$rdlist" 2>/dev/null
+import struct, sys
+d = open(sys.argv[1], 'rb').read()
+rdsz = struct.unpack('<I', d[0x18:0x1c])[0]
+open(sys.argv[2], 'wb').write(d[4096:4096 + rdsz])
+PY
+		then
+			t "ramdisk $(basename "$b") has root fsck binaries" \
+				sh -c "grep -q '^usr/sbin/e2fsck\$' '$rdlist' && grep -q '^usr/sbin/fsck\$' '$rdlist'"
+			t "ramdisk $(basename "$b") has serial rescue hook" \
+				grep -q '^scripts/init-top/diting-debug$' "$rdlist"
+		else
+			bad "ramdisk $(basename "$b") could not be unpacked for content checks"
+		fi
+		rm -rf "$tmp"
+	fi
 done
 [ "$found" = 1 ] || skip "no boot images built"
 
