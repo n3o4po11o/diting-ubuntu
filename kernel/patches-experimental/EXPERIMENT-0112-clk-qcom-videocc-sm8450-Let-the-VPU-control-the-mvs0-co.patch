@@ -1,0 +1,31 @@
+From: f <f@f>
+Date: Mon, 23 Nov 2026 21:00:00 +0800
+Subject: [PATCH] clk: qcom: videocc-sm8450: Let the VPU control the mvs0 core clock
+
+The video encoder firmware (vpu20_4v) is told by the driver that the
+hardware may power collapse the VPP core on its own (HFI_PROP_
+INTRA_FRAME_POWER_COLLAPSE), and the mvs0 power domain already allows
+the hardware trigger (HW_CTRL_TRIGGER). The third piece of that path is
+the clock: the VPU can only restart its own core clock when the RCG is
+in hardware clock control mode (CFG_HW_CLK_CTRL, bit 20 of the CFG
+register). The downstream videocc-waipio driver sets it on
+video_cc_mvs0_clk_src (HW_CLK_CTRL_MODE); mainline knows the mode
+(struct clk_rcg2::hw_clk_ctrl) but no clock source on SM8450 enables
+it.
+
+Without it the VPP never comes back once the encoder firmware hands
+the core to the hardware, and the first encoded frame resets the whole
+SoC. Decoding does not enter that path and worked regardless.
+
+Local Diting bring-up change, not submitted upstream.
+---
+--- a/drivers/clk/qcom/videocc-sm8450.c	2026-11-23 19:51:06.740830377 +0800
++++ b/drivers/clk/qcom/videocc-sm8450.c	2026-11-23 19:51:06.740830377 +0800
+@@ -156,6 +156,7 @@
+ 	.hid_width = 5,
+ 	.parent_map = video_cc_parent_map_0,
+ 	.freq_tbl = ftbl_video_cc_mvs0_clk_src,
++	.hw_clk_ctrl = true,
+ 	.clkr.hw.init = &(const struct clk_init_data) {
+ 		.name = "video_cc_mvs0_clk_src",
+ 		.parent_data = video_cc_parent_data_0,

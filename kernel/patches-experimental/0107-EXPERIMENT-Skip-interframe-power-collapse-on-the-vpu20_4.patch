@@ -1,0 +1,53 @@
+From 000000000000000000000000000000000000000107 Mon Sep 17 00:00:00 2001
+From: f <f@f>
+Date: Sun, 23 Nov 2026 12:00:00 +0800
+Subject: [PATCH] media: iris: Skip interframe power collapse on the vpu20_4v firmware
+
+With interframe power collapse enabled, the vpu20_4v firmware dies in
+the VPP power-collapse handshake while encoding the very first frame
+(the firmware log ends at "VppDec: PC refcount 0 and on is_needed 1");
+the next register access resets the SoC. Observed on the Xiaomi 12T
+Pro (SM8475) with every encoder session.
+
+Skip the HFI property for the Gen2 firmware of VPU 2.0 only; the core
+stays powered between frames. The SM8550 firmware data is unchanged.
+
+Local Diting bring-up change, not submitted upstream.
+---
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen2.c b/drivers/media/platform/qcom/iris/iris_hfi_gen2.c
+index d519dc0..8e7a845 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2.c
+@@ -1149,4 +1149,5 @@ const struct iris_firmware_data iris_hfi_gen2_vpu2_data = {
+ 	.dec_ip_int_buf_tbl = sm8450_dec_ip_int_buf_tbl,
+ 	.dec_ip_int_buf_tbl_size = ARRAY_SIZE(sm8450_dec_ip_int_buf_tbl),
+ 	.resume_without_payload = true,
++	.skip_interframe_pc = true,
+ };
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c b/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
+index 31427db..ac06897 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
+@@ -59,6 +59,10 @@ static int iris_hfi_gen2_sys_interframe_powercollapse(struct iris_core *core)
+ 	struct iris_hfi_header *hdr;
+ 	int ret;
+ 
++	/* vpu20_4v: the firmware VPP dies at the first encoded frame */
++	if (core->iris_firmware_data->skip_interframe_pc)
++		return 0;
++
+ 	hdr = kzalloc(SYS_IFPC_PKT_SIZE, GFP_KERNEL);
+ 	if (!hdr)
+ 		return -ENOMEM;
+diff --git a/drivers/media/platform/qcom/iris/iris_platform_common.h b/drivers/media/platform/qcom/iris/iris_platform_common.h
+index 83ee9fc..ec55c8a 100644
+--- a/drivers/media/platform/qcom/iris/iris_platform_common.h
++++ b/drivers/media/platform/qcom/iris/iris_platform_common.h
+@@ -286,6 +286,7 @@ struct iris_firmware_data {
+ 
+ 	/* HFI_CMD_RESUME without payload (Gen2 firmware of VPU 2.0 SoCs) */
+ 	bool resume_without_payload;
++	bool skip_interframe_pc;
+ };
+ 
+ struct iris_firmware_desc {

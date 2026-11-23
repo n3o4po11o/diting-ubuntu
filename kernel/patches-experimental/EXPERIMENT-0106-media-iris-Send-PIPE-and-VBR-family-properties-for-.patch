@@ -1,0 +1,79 @@
+From: f <f@f>
+Date: Mon, 23 Nov 2026 20:00:00 +0800
+Subject: [PATCH] media: iris: Send PIPE and VBR family properties for the encoder
+
+The vpu20_4v firmware expects the encoder session to carry the vendor
+waipio defaults that the mainline SM8450 capability table does not
+model: HFI_PROP_PIPE = 4 with HFI_PROP_STAGE, and the VBR companion
+family with HFI_PROP_RATE_CONTROL (instance_data_waipio[] of the
+msm_vidc driver). HFI_PROP_BLUR_TYPES is deliberately not sent: the
+firmware rejects it ("Error in SetProperty HFI_PROP_BLUR_TYPES") when
+no blur resolution is configured.
+
+Send them from iris_hfi_gen2_session_set_property() before the
+triggering property, encoder sessions only.
+
+Local Diting bring-up change, not submitted upstream.
+---
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c b/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
+index 4029eda..fde3241 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
+@@ -155,6 +155,57 @@ static int iris_hfi_gen2_session_set_property(struct iris_inst *inst, u32 packet
+ {
+ 	struct iris_inst_hfi_gen2 *inst_hfi_gen2 = to_iris_inst_hfi_gen2(inst);
+ 
++	/* vpu20_4v encoder: PIPE comes with STAGE (vendor default 4 pipes) */
++	if (inst->domain == ENCODER && packet_type == HFI_PROP_STAGE) {
++		u32 pipe = 4;
++		int ret;
++
++		iris_hfi_gen2_packet_session_property(inst, HFI_PROP_PIPE,
++						      HFI_HOST_FLAGS_NONE, plane,
++						      HFI_PAYLOAD_U32,
++						      &pipe, sizeof(u32));
++		ret = iris_hfi_queue_cmd_write(inst->core, inst_hfi_gen2->packet,
++					       inst_hfi_gen2->packet->size);
++		if (ret)
++			return ret;
++	}
++
++	/*
++	 * vpu20_4v encoder: the VBR companion family the vendor sends with
++	 * HFI_PROP_RATE_CONTROL (msm_vidc_waipio.c defaults).
++	 */
++	if (inst->domain == ENCODER && packet_type == HFI_PROP_RATE_CONTROL) {
++		static const struct {
++			u32 id;
++			u32 val;
++		} vbr_family[] = {
++			{ 0x0300012b, 1 },		/* TIME_DELTA_BASED_RATE_CONTROL */
++			{ 0x0300012c, 1 },		/* CONTENT_ADAPTIVE_CODING_ENABLED */
++			{ 0x0300012d, 25 },	/* BITRATE_BOOST */
++			{ 0x03000176, 300 },	/* VBV_DELAY (x100 ms) */
++			{ 0x0300017d, 70 },	/* MAINTAIN_MIN_QUALITY */
++			{ 0x03000122, 1 },	/* TRANSFORM_8X8 */
++			{ 0x03000151, 0 },	/* GENERATE_AUD */
++			{ 0x0300017c, 22000000 },	/* TOTAL_PEAK_BITRATE */
++		};
++		u32 val;
++		int i, ret;
++
++		for (i = 0; i < ARRAY_SIZE(vbr_family); i++) {
++			val = vbr_family[i].val;
++			iris_hfi_gen2_packet_session_property(inst,
++							      vbr_family[i].id,
++							      HFI_HOST_FLAGS_NONE, plane,
++							      HFI_PAYLOAD_U32,
++							      &val, sizeof(u32));
++			ret = iris_hfi_queue_cmd_write(inst->core,
++						       inst_hfi_gen2->packet,
++						       inst_hfi_gen2->packet->size);
++			if (ret)
++				return ret;
++		}
++	}
++
+ 	iris_hfi_gen2_packet_session_property(inst,
+ 					      packet_type,
+ 					      flag,

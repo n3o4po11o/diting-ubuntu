@@ -399,3 +399,33 @@ Rescue tooling for a hung boot: `diting.debug=usb` on the cmdline gives
 a root shell on the USB ACM serial (see scripts/serial-fsck.py —
 e2fsck over serial; the same channel also carries module/file pushes
 and poweroff for cold reboots).
+
+## Video: two traps found while working on the encoder (2026-11-23)
+
+**Never list SID 0x2184 in the iris DT node.** Adding it to `iommus` stops
+the boot right after `arm-smmu 15000000.iommu: preserved 0 boot mappings`
+(black screen, no USB gadget, no SSH), reproduced twice, with the kernel
+and initramfs byte-identical to a working image. The screen freezes before
+any "Adding to iommu group" line. Mechanism unknown. Recovery: force a
+reboot into fastboot and flash a boot/vendor_boot pair built without it.
+
+**Do not skip HFI_PROP_INTRA_FRAME_POWER_COLLAPSE.** Not sending it makes
+the VPP core unusable for decoding as well: every session logs
+`ResetCore(1244): HW polling reached max iterations` and no frame is ever
+decoded. The mainline behaviour (sending it) is required.
+
+### Video encoder (SM8475 iris): resets the SoC on the first hardware frame
+
+Status with the experimental series (kernel/patches-experimental,
+EXPERIMENT-0105..0110): the firmware accepts the whole session — internal
+buffers, subscriptions, HFI_CMD_START on both ports — and resets the SoC
+the moment it hands frame 0 to the VPP. No SMMU fault, no firmware error
+line reaches the host; older captures show `HFI_SYS_ERROR_SLV_ERR` at that
+point. Decode is unaffected by the series.
+
+Raised MXC corner (patch 0111): the iris OPP table gave MXC svs at 366 MHz
+and svs_l1 at 444 MHz where the downstream videocc driver requires
+svs_l1 and nom (first required-opp lands on MXC, measured). Raised; it
+was out of spec for decoding too at those points, but it is not the
+cause of the encoder reset. See kernel/patches-experimental/README.md for
+the experiment log and the next step (ARP stream via the non-pixel SID).

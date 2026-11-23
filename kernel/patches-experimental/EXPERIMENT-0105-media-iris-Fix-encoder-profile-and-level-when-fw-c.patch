@@ -1,0 +1,42 @@
+From 000000000000000000000000000000000000000105 Mon Sep 17 00:00:00 2001
+From: f <f@f>
+Date: Sun, 23 Nov 2026 12:00:00 +0800
+Subject: [PATCH] media: iris: Fix encoder profile and level when fw caps are zero
+
+The vpu20_4v firmware of SM8450/SM8475 reports the encoder PROFILE and
+LEVEL capabilities as 0, so the values userspace sets (H.264 baseline,
+level 1.0) are passed through untranslated and the firmware dies at
+session start. Fall back to the vendor table defaults for H.264: High
+profile (HFI enum 4) and level 5.0 (HFI enum 14), matching
+instance_data_waipio[] of the msm_vidc driver.
+
+Encoder-only; the decoder keeps the firmware-reported values.
+
+Local Diting bring-up change, not submitted upstream.
+---
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c b/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
+index 919a167..4029eda 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
+@@ -416,6 +416,10 @@ static int iris_hfi_gen2_set_profile(struct iris_inst *inst, u32 plane)
+ 		break;
+ 	}
+ 
++	/* vpu20_4v: encoder PROFILE cap stays 0; use the vendor default */
++	if (inst->domain == ENCODER && !profile && inst->codec == V4L2_PIX_FMT_H264)
++		profile = 4; /* HFI AVC High profile */
++
+ 	inst_hfi_gen2->src_subcr_params.profile = profile;
+ 
+ 	return iris_hfi_gen2_session_set_property(inst,
+@@ -448,6 +452,10 @@ static int iris_hfi_gen2_set_level(struct iris_inst *inst, u32 plane)
+ 		break;
+ 	}
+ 
++	/* vpu20_4v: encoder LEVEL cap stays 0; use the vendor default */
++	if (inst->domain == ENCODER && !level && inst->codec == V4L2_PIX_FMT_H264)
++		level = 14; /* HFI AVC level 5.0 */
++
+ 	inst_hfi_gen2->src_subcr_params.level = level;
+ 
+ 	return iris_hfi_gen2_session_set_property(inst,

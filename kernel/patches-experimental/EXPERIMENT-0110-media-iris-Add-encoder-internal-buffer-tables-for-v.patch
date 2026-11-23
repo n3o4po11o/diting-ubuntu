@@ -1,0 +1,139 @@
+From: f <f@f>
+Date: Mon, 23 Nov 2026 20:00:00 +0800
+Subject: [PATCH] media: iris: Complete the encoder internal buffers for vpu20_4v
+
+The Gen2 firmware data of VPU 2.0 carried only the decoder internal
+buffer tables and the encoder buffer path had three more gaps, so the
+firmware rejected every encoder START ("SW does not set all required
+BITSTREAM port internal buffers") and answered every ETB/FTB with an
+error in the wrong state.
+
+Port the encoder internal buffer handling in one step from the vendor
+iris2 driver (msm_vidc_buffer_iris2.c, msm_venc.c, hfi_packet.c):
+
+- encoder internal buffer type tables in the vpu2 firmware data: input
+  port VPSS, output port BIN, COMV, NON_COMV, LINE, DPB
+- BUF_DPB belongs to HFI_PORT_BITSTREAM for encoder sessions
+- iris_vpu_enc_dpb_size(): the HFI_BUFFER_DPB_H264E formula
+  (reference frame, 128x32 aligned, plus NV12-UBWC metadata planes)
+- encoder DPB count: the msm_vidc_get_recon_buf_count() default of 2
+- queue the encoder DPB at streamon like every other encoder internal
+  buffer. Deferring DPB until the instance streams deadlocks the
+  vpu20_4v bring-up: the firmware does not accept HFI_CMD_START
+  without the reconstruction buffers. Decoders keep the deferral.
+
+Local Diting bring-up change, not submitted upstream.
+---
+diff -ruN pgA/drivers/media/platform/qcom/iris/iris_buffer.c pgB/drivers/media/platform/qcom/iris/iris_buffer.c
+--- a/drivers/media/platform/qcom/iris/iris_buffer.c	2026-11-23 19:19:42.385160380 +0800
++++ b/drivers/media/platform/qcom/iris/iris_buffer.c	2026-11-23 19:19:42.393160385 +0800
+@@ -667,7 +667,15 @@
+ 				continue;
+ 			if (buffer->attr & BUF_ATTR_QUEUED)
+ 				continue;
+-			if (buffer->type == BUF_DPB && inst->state != IRIS_INST_STREAMING) {
++			/*
++			 * The vpu20_4v firmware refuses HFI_CMD_START until the DPB
++			 * (reconstruction) buffers are queued: deferring them until the
++			 * instance streams deadlocks the encoder bring-up. The vendor
++			 * driver queues every encoder internal buffer at streamon, so
++			 * only decoders keep the deferred queueing.
++			 */
++			if (inst->domain == DECODER && buffer->type == BUF_DPB &&
++				inst->state != IRIS_INST_STREAMING) {
+ 				buffer->attr |= BUF_ATTR_DEFERRED;
+ 				continue;
+ 			}
+diff -ruN pgA/drivers/media/platform/qcom/iris/iris_hfi_gen2.c pgB/drivers/media/platform/qcom/iris/iris_hfi_gen2.c
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2.c	2026-11-23 19:19:42.385160380 +0800
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2.c	2026-11-23 19:19:42.393160385 +0800
+@@ -1077,6 +1077,18 @@
+ 	BUF_LINE,
+ };
+ 
++static const u32 sm8450_enc_ip_int_buf_tbl[] = {
++	BUF_VPSS,
++};
++
++static const u32 sm8450_enc_op_int_buf_tbl[] = {
++	BUF_BIN,
++	BUF_COMV,
++	BUF_NON_COMV,
++	BUF_LINE,
++	BUF_DPB,
++};
++
+ #define IRIS_HFI_GEN2_COMMON_DATA \
+ 	.init_hfi_ops = iris_hfi_gen2_sys_ops_init, \
+ 	.core_arch = VIDEO_ARCH_LX, \
+@@ -1148,5 +1160,9 @@
+ 	IRIS_HFI_GEN2_COMMON_DATA,
+ 	.dec_ip_int_buf_tbl = sm8450_dec_ip_int_buf_tbl,
+ 	.dec_ip_int_buf_tbl_size = ARRAY_SIZE(sm8450_dec_ip_int_buf_tbl),
++	.enc_ip_int_buf_tbl = sm8450_enc_ip_int_buf_tbl,
++	.enc_ip_int_buf_tbl_size = ARRAY_SIZE(sm8450_enc_ip_int_buf_tbl),
++	.enc_op_int_buf_tbl = sm8450_enc_op_int_buf_tbl,
++	.enc_op_int_buf_tbl_size = ARRAY_SIZE(sm8450_enc_op_int_buf_tbl),
+ 	.resume_without_payload = true,
+ };
+diff -ruN pgA/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c pgB/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c	2026-11-23 19:19:42.385160380 +0800
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c	2026-11-23 19:19:42.393160385 +0800
+@@ -140,6 +140,7 @@
+ 		case BUF_COMV:
+ 		case BUF_NON_COMV:
+ 		case BUF_LINE:
++		case BUF_DPB:
+ 		case BUF_SCRATCH_2:
+ 			return HFI_PORT_BITSTREAM;
+ 		case BUF_ARP:
+diff -ruN pgA/drivers/media/platform/qcom/iris/iris_vpu_buffer.c pgB/drivers/media/platform/qcom/iris/iris_vpu_buffer.c
+--- a/drivers/media/platform/qcom/iris/iris_vpu_buffer.c	2026-11-23 19:19:42.385160380 +0800
++++ b/drivers/media/platform/qcom/iris/iris_vpu_buffer.c	2026-11-23 19:19:42.393160385 +0800
+@@ -1470,6 +1470,29 @@
+ 	return size;
+ }
+ 
++static u32 iris_vpu_enc_dpb_size(struct iris_inst *inst)
++{
++	struct v4l2_format *f = inst->fmt_dst;
++	u32 width = f->fmt.pix_mp.width;
++	u32 height = f->fmt.pix_mp.height;
++	u32 buffer_height, chroma_height, buffer_width;
++	u32 ref_buf_size, metadata_stride, metadata_buf_height;
++	u32 meta_size_y, meta_size_c;
++
++	/* HFI_BUFFER_DPB_H264E of msm_vidc_buffer_iris2.c (8-bit) */
++	buffer_height = ALIGN(height, 32);
++	chroma_height = ALIGN(height >> 1, 32);
++	buffer_width = ALIGN(width, 128);
++	ref_buf_size = (buffer_height + chroma_height) * buffer_width;
++
++	metadata_stride = ALIGN(DIV_ROUND_UP(width, 32), 64);
++	metadata_buf_height = ALIGN(DIV_ROUND_UP(height, 8), 16);
++	meta_size_y = ALIGN(metadata_stride * metadata_buf_height, 4096);
++	meta_size_c = meta_size_y;
++
++	return ref_buf_size + meta_size_y + meta_size_c;
++}
++
+ static u32 iris_vpu_enc_arp_size(struct iris_inst *inst)
+ {
+ 	return HFI_BUFFER_ARP_ENC;
+@@ -2098,6 +2121,7 @@
+ 		{BUF_COMV,        iris_vpu_enc_comv_size            },
+ 		{BUF_NON_COMV,    iris_vpu_enc_non_comv_size        },
+ 		{BUF_LINE,        iris_vpu_enc_line_size            },
++		{BUF_DPB,         iris_vpu_enc_dpb_size             },
+ 		{BUF_ARP,         iris_vpu_enc_arp_size             },
+ 		{BUF_VPSS,        iris_vpu_enc_vpss_size            },
+ 		{BUF_SCRATCH_1,   iris_vpu_enc_scratch1_size        },
+@@ -2250,6 +2274,8 @@
+ 	case BUF_PARTIAL:
+ 		return 1; /* internal buffer count needed by firmware is 1 */
+ 	case BUF_DPB:
++		if (inst->domain == ENCODER)
++			return 2; /* msm_vidc_get_recon_buf_count() default */
+ 		return iris_vpu_dpb_count(inst);
+ 	default:
+ 		return 0;

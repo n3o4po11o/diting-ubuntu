@@ -412,3 +412,151 @@ provider, stock DTB spec 2) + assert/deassert it in the driver power
 path like the vendor; drop BLUR_TYPES; fix encoder CROP_OFFSETS.
 Also queued: error-session module refcnt -1 (unload hangs, D state,
 blocks reboot — needs session cleanup fix).
+
+## 2026-11-23 night — three root causes found by controlled experiments
+
+### 1. Skipping inter-frame power collapse (old venc_nopc / patch 0107) silences the VPP
+
+Control experiment: same module with and without the skip.
+
+| config | decode | encode |
+|---|---|---|
+| skip HFI_PROP_INTRA_FRAME_POWER_COLLAPSE (v10..v31, patch 0107) | broken, 0 frames | session completes, VPP dead, no crash |
+| send it (upstream behaviour) | works | SoC reset |
+
+Without the property the firmware logs, in every session (decode too),
+`ResetCore(1244): HW polling reached max iterations` right after the
+first hardware job: the VPP core never runs. Every "encode works"
+claim from v10 on was based on the `Venc frame No. N` dispatch line
+and on internal byte counters; the hardware never encoded a frame.
+The old logs prove it: ResetCore appears in enc-exp14..18 (nopc=1)
+and in none of exp1..12. 0107 is therefore retired (0107-EXPERIMENT-*).
+The "VppDec: PC refcount 0 and on is_needed 1" line of v9 was also
+misread: it is an informational power-up message, followed by
+`VPPSG start VPPSG task for frame 0` and then a firmware system error.
+
+### 2. The encoder crashed the SoC because MXC was one corner too low
+
+With the VPP alive the encoder reset the SoC about 3 ms after the
+firmware received HFI_PROP_RAW_RESOLUTION (captured live over the
+network with `dmesg -w`, /tmp/enc-crash-live.log).
+
+Measured rails vs clock (pm_genpd_summary + clk_summary):
+
+| state | mvs0 | MXC | MMCX |
+|---|---|---|---|
+| scaled session, 240 MHz point | 240 MHz | 128 (svs) | 64 (low_svs) |
+| power-on, 444 MHz point | 444 MHz | 192 (svs_l1) | 256 (nom) |
+
+so the first required-opp of the iris OPP table lands on MXC and the
+second on MMCX. Downstream videocc-waipio.c (rate_max of
+video_cc_mvs0_clk_src, classes vdd_mm and vdd_mxc) requires, for both
+rails: LOW_SVS <= 720 MHz, SVS <= 1014, SVS_L1 <= 1098, NOM <= 1332.
+The table gave MXC svs at 366 MHz and svs_l1 at 444 MHz. Decoding
+mostly lands on the low points and survived; the encoder takes the
+444 MHz point and died on the first VPP access. Patch 0111 raises MXC
+to svs_l1 / nom at those two points.
+
+Lesson: hardware that "works" can still be out of spec; measure rails
+and clocks against the downstream clock driver before trusting a
+decode-only validation.
+
+### 3. Boot hangs were never kernel regressresses
+
+See KNOWN_ISSUES.md: a DITING_ROOT_CMDLINE override without root= and
+the initramfs fsck flake.
+
+### Method notes
+
+- Count frames (fpsdisplaysink + EOS), never trust "pipeline did not
+  error".
+- Experiment scripts live in this directory and are applied on top of
+  the clean series; exp-fwlog-trace.py adds the firmware log (module
+  parameter fwlog_level) and HFI TX/RX tracing.
+- Patches are generated mechanically (diff of two trees) and validated
+  with `patch --fuzz=0` on the base they will be applied to.
+
+## 2026-11-23 late — encoder: session accepted, first hardware frame resets the SoC
+
+With the boot red herrings gone, the encoder was driven with the VPP
+alive and a network `dmesg -w` capture running for every attempt.
+
+### What the firmware accepts now (EXPERIMENT-0105/0106/0108/0109/0110)
+
+Session open, all properties, the encoder internal buffers (ARP, BIN,
+COMV, NON_COMV, LINE, DPB x2, VPSS), SUBSCRIBE/DELIVERY on both ports,
+HFI_CMD_START success on both ports, components created (Worker,
+VPPSG, VSPAP, Reorder), SESSION_START, first ETB accepted. Then the
+SoC resets within milliseconds, with no SMMU fault and no firmware
+error line reaching the host. In the v9-era logs the same moment
+produced `HFI_SYS_ERROR_SLV_ERR` (0x5000002), i.e. the VPU saw a
+slave/bus error when the hardware started frame 0.
+
+Encoder internal buffer sizes were re-verified numerically against
+the vendor macros themselves (`/tmp/vsz` on the build server, 1280x1104,
+H.264, 4 pipes, 2 recon frames): COMV 666624, NON_COMV 463616, LINE
+531456, DPB 2195456, ARP 204800 are identical to what the mainline
+code sends; BIN is larger than the vendor value (14663168 vs 11935232).
+Sizes are not the problem. (Vendor allocates no VPSS buffer without
+downscale/blur; mainline queues one.)
+
+### Hardware-level differences tested, one per SoC reset
+
+| change | verified on hardware | encoder |
+|---|---|---|
+| MXC corner raised to svs_l1/nom at 366/444 MHz (patch 0111) | rails 192 -> 256 | still resets |
+| video_cc_mvs0_clk_src hw_clk_ctrl (EXPERIMENT-0112) | CFG bit 20 = 1 | still resets |
+| ARP buffer mapped at 0x01000000, the downstream non-pixel pool (exp-arp-reset.py, driver part) | firmware receives addr 0x01000000 | still resets |
+| SID 0x2184 added to the iris node in the DT | **hangs the boot**, see below | not reached |
+
+0111 and EXPERIMENT-0112 are kept because both bring the node in line
+with downstream and decode passes with them; neither explains the
+encoder reset.
+
+### TRAP: SID 0x2184 in the iris DT node hangs the boot (2/2)
+
+`iommus = <&apps_smmu 0x2180 0x400>, <&apps_smmu 0x2187 0x400>,
+<&apps_smmu 0x2184 0x400>` on the iris node: the kernel stops right
+after `arm-smmu 15000000.iommu: preserved 0 boot mappings`, before any
+`Adding to iommu group` line. Kernel Image and initramfs were byte
+identical to the working image; the decompiled DTBs differ in exactly
+those lines. Reproduced twice. The same boot images without the line
+boot. Mechanism not identified: mainline allocates context banks
+dynamically and treats the third stream like any other. exp-arp-reset.py
+now refuses to apply that edit unless `ARP_SID_DT=I-know-it-hangs-boot`.
+
+### Leading hypothesis: the ARP fetch uses the non-pixel master SID
+
+Downstream maps the encoder ARP buffer (the register programming stream
+the VPP executes: `HXU_HACK: SWI programming: 0x...`) through
+venus_sec_non_pixel (SID 0x2184) even for non-secure sessions. It is
+the only buffer type routed there, and ARP is encoder-only (decoders
+use PERSIST), which matches "decode works, encode dies on the first
+hardware job". Moving the buffer to the non-pixel IOVA pool alone did
+not help (V7), consistent with the fetch being aborted at the SMMU for
+an unmatched stream before the address matters.
+
+Next test (built, not yet run): `linux-image-v8-arpsid.deb` in
+`release/enc-series-v2/` on the Mac — exp-arp-sid-mask.py widens the
+mask of the existing SID 0x2180 stream match entry to 0x47f at the
+first encoder session, so 0x2180-0x21ff share the iris context bank.
+Module-only, boot-safe (the module is blacklisted); module parameter
+`arp_sid_alias` for an ablation run. Flash the V5-equivalent images
+(`boot-v7.img` / `vendor_boot-v7.img`, DTB and kernel identical to
+V5), install the deb, run the encoder.
+
+If V8 still resets, ARP is not the (only) cause; remaining untested
+items: video_core_reset in the DT (upstream sm8250 resets "bus" and
+"core"; the local node only has "bus" — never tested alone), the
+input format (linear NV12 vs UBWC), and the encoder properties the
+firmware rejects (`Error in SetProperty HFI_PROP_CROP_OFFSETS`).
+
+### Oddities noted
+
+- `HFI_PROP_PROFILE`/`HFI_PROP_LEVEL` go out as 0 although the
+  EXPERIMENT-0105 fallback should send 4/14; the sending path was not
+  traced.
+- Mainline sends `HFI_PROP_COMV_BUFFER_COUNT = 4`; the downstream
+  waipio driver never sends that property.
+- The firmware logs `Error in SetProperty HFI_PROP_CROP_OFFSETS` for
+  the raw port in every encoder session.

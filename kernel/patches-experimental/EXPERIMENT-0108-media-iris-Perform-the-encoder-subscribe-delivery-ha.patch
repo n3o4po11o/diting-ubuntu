@@ -1,0 +1,132 @@
+From 000000000000000000000000000000000000000108 Mon Sep 17 00:00:00 2001
+From: f <f@f>
+Date: Sun, 23 Nov 2026 12:00:00 +0800
+Subject: [PATCH] media: iris: Perform the encoder subscribe and delivery handshake
+
+The mainline driver skips the property subscription entirely for
+encoder sessions. The vendor driver (msm_venc.c), running the same
+vpu20_4v firmware, performs a small handshake before every encoder
+START:
+
+- SUBSCRIBE_MODE [HFI_MODE_PROPERTY, PICTURE_TYPE, BUFFER_MARK,
+  WORST_COMPRESSION_RATIO] on the bitstream port,
+- SUBSCRIBE_MODE [HFI_MODE_PROPERTY, NO_OUTPUT] on the raw port,
+- SUBSCRIBE_MODE [HFI_MODE_METADATA] on the bitstream port and
+  DELIVERY_MODE [HFI_MODE_METADATA] on the raw port (all metadata caps
+  default to disabled, so the payload is the bare mode word).
+
+Without the handshake the firmware encodes frames and writes the
+bitstream buffers but never raises the HFI_CMD_BUFFER responses that
+complete the buffers, so no encoded data reaches userspace.
+
+Replace the encoder early-return in iris_hfi_gen2_subscribe_property()
+with the vendor property lists and add the metadata-mode commands to
+iris_hfi_gen2_session_start(). Decoder lists and the
+PORT_SETTINGS_CHANGE subscription are unchanged.
+
+Local Diting bring-up change, not submitted upstream.
+---
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c b/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
+index ac06897..609f07a 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2_command.c
+@@ -957,6 +957,35 @@ static int iris_hfi_gen2_session_subscribe_mode(struct iris_inst *inst,
+ 					inst_hfi_gen2->packet->size);
+ }
+ 
++static int iris_hfi_gen2_session_metadata_mode(struct iris_inst *inst, u32 plane)
++{
++	struct iris_inst_hfi_gen2 *inst_hfi_gen2 = to_iris_inst_hfi_gen2(inst);
++	u32 payload[1] = { HFI_MODE_METADATA };
++	u32 cmd;
++
++	/*
++	 * vpu20_4v encoder: the metadata-mode handshake of the vendor
++	 * driver - DELIVERY_MODE on the raw port, SUBSCRIBE_MODE on the
++	 * bitstream port, before every encoder START. All metadata caps
++	 * default to disabled, so the payload is the bare mode word.
++	 */
++	cmd = V4L2_TYPE_IS_OUTPUT(plane) ? HFI_CMD_DELIVERY_MODE :
++					   HFI_CMD_SUBSCRIBE_MODE;
++
++	iris_hfi_gen2_packet_session_command(inst,
++					     cmd,
++					     (HFI_HOST_FLAGS_RESPONSE_REQUIRED |
++					     HFI_HOST_FLAGS_INTR_REQUIRED),
++					     iris_hfi_gen2_get_port(inst, plane),
++					     inst->session_id,
++					     HFI_PAYLOAD_U32_ARRAY,
++					     &payload[0],
++					     sizeof(payload));
++
++	return iris_hfi_queue_cmd_write(inst->core, inst_hfi_gen2->packet,
++					inst_hfi_gen2->packet->size);
++}
++
+ static int iris_hfi_gen2_subscribe_change_param(struct iris_inst *inst, u32 plane)
+ {
+ 	struct iris_inst_hfi_gen2 *inst_hfi_gen2 = to_iris_inst_hfi_gen2(inst);
+@@ -1123,8 +1152,28 @@ static int iris_hfi_gen2_subscribe_property(struct iris_inst *inst, u32 plane)
+ 
+ 	payload[0] = HFI_MODE_PROPERTY;
+ 
+-	if (inst->domain == ENCODER)
+-		return 0;
++	if (inst->domain == ENCODER) {
++		/*
++		 * vpu20_4v encoder: the small vendor lists - the decoder
++		 * lists carry ids the encoder firmware rejects.
++		 */
++		if (V4L2_TYPE_IS_OUTPUT(plane)) {
++			payload[1] = HFI_PROP_NO_OUTPUT;
++			subscribe_prop_size = 1;
++		} else {
++			payload[1] = HFI_PROP_PICTURE_TYPE;
++			payload[2] = HFI_PROP_BUFFER_MARK;
++			payload[3] = HFI_PROP_WORST_COMPRESSION_RATIO;
++			subscribe_prop_size = 3;
++		}
++
++		return iris_hfi_gen2_session_subscribe_mode(inst,
++						  HFI_CMD_SUBSCRIBE_MODE,
++						  plane,
++						  HFI_PAYLOAD_U32_ARRAY,
++						  &payload[0],
++						  (subscribe_prop_size + 1) * sizeof(u32));
++	}
+ 
+ 	if (V4L2_TYPE_IS_OUTPUT(plane)) {
+ 		subscribe_prop_size = core->iris_firmware_data->dec_input_prop_size;
+@@ -1178,6 +1227,12 @@ static int iris_hfi_gen2_session_start(struct iris_inst *inst, u32 plane)
+ 	if (ret)
+ 		return ret;
+ 
++	if (inst->domain == ENCODER) {
++		ret = iris_hfi_gen2_session_metadata_mode(inst, plane);
++		if (ret)
++			return ret;
++	}
++
+ 	iris_hfi_gen2_packet_session_command(inst,
+ 					     HFI_CMD_START,
+ 					     (HFI_HOST_FLAGS_RESPONSE_REQUIRED |
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen2_defines.h b/drivers/media/platform/qcom/iris/iris_hfi_gen2_defines.h
+index 8c5a4f5..03549f9 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2_defines.h
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2_defines.h
+@@ -20,6 +20,7 @@
+ #define HFI_CMD_DRAIN				0x01000007
+ #define HFI_CMD_RESUME				0x01000008
+ #define HFI_CMD_BUFFER				0x01000009
++#define HFI_CMD_DELIVERY_MODE			0x0100000A
+ #define HFI_CMD_SUBSCRIBE_MODE			0x0100000B
+ #define HFI_CMD_SETTINGS_CHANGE			0x0100000C
+ #define HFI_CMD_PAUSE				0x01000011
+@@ -167,6 +168,7 @@ enum hfi_flip {
+ enum hfi_property_mode_type {
+ 	HFI_MODE_PORT_SETTINGS_CHANGE		= 0x00000001,
+ 	HFI_MODE_PROPERTY			= 0x00000002,
++	HFI_MODE_METADATA			= 0x00000004,
+ };
+ 
+ enum hfi_color_format {

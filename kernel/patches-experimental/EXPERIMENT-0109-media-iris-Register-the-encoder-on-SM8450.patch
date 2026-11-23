@@ -1,0 +1,30 @@
+From 000000000000000000000000000000000000000109 Mon Sep 17 00:00:00 2001
+From: f <f@f>
+Date: Sun, 23 Nov 2026 12:00:00 +0800
+Subject: [PATCH] media: iris: Register the encoder on SM8450
+
+The four encoder fixes for the vpu20_4v firmware are in place
+(profile/level fallback, PIPE + VBR family, interframe power collapse
+skip, subscribe/delivery handshake); register the encoder so userspace
+sees the CAPTURE devices.
+
+Local Diting bring-up change, not submitted upstream.
+---
+diff --git a/drivers/media/platform/qcom/iris/iris_platform_vpu2.c b/drivers/media/platform/qcom/iris/iris_platform_vpu2.c
+index 74f363d..66ad6af 100644
+--- a/drivers/media/platform/qcom/iris/iris_platform_vpu2.c
++++ b/drivers/media/platform/qcom/iris/iris_platform_vpu2.c
+@@ -160,11 +160,8 @@ const struct iris_platform_data sm8450_data = {
+ 	.tz_cp_config_data = tz_cp_config_vpu2,
+ 	.tz_cp_config_data_size = ARRAY_SIZE(tz_cp_config_vpu2),
+ 	.num_vpp_pipe = 4,
+-	/*
+-	 * The encoder hangs the firmware at the start of a session and the
+-	 * next register access resets the SoC; keep it off until fixed.
+-	 */
+-	.no_encoder = true,
++	/* encoder fixed for vpu20_4v: profile/level, PIPE+VBR, PC skip, handshake */
++	.no_encoder = false,
+ 	.max_session_count = 16,
+ 	.max_core_mbpf = NUM_MBS_8K,
+ 	.max_core_mbps = ((7680 * 4320) / 256) * 60,
