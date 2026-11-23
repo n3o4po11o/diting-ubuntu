@@ -376,3 +376,39 @@ code path and its enabling conditions.
 
 Test: blacklist boot, manual modprobe, gst encoder run; success =
 `POLL: enc output idx=N size=N` in dmesg AND a non-zero output file.
+
+## 2026-11-23 evening: encoder session finally HEALTHY (0105-0110 + DPB deferral fix)
+
+After fixing the boot red herrings (DITING_ROOT_CMDLINE override dropped
+root=; initramfs fsck flake — see KNOWN_ISSUES), the -52 kernel boots
+and the encoder reached a fully healthy session state:
+
+- 0110 complete: enc internal buffer tables + DPB port/size/count
+- DPB DEFERRAL FIX (not yet in a patch file): iris_buffer.c queues
+  BUF_DPB only after IRIS_INST_STREAMING, but vpu20_4v requires the
+  recon buffers BEFORE it accepts HFI_CMD_START — a deadlock by design.
+  Gate the deferral on DECODER (vendor queues all enc internals at
+  streamon). sed: `buffer->type == BUF_DPB && inst->domain == DECODER`.
+- Result: START accepted, ETB consumed (FrameIdx 0..3), FTBs accepted
+  (FW Internal: 1059840), real encoding happens ("Venc frame No. 1
+  FrameQP=32"), 223KB bitstream accumulates internally. Clocks at max
+  (mvs0 444 MHz). Decode unaffected.
+
+REMAINING (the last mile):
+1. fw never writes FTB buffers / never raises HFI_CMD_BUFFER output
+   responses — output file stays 0 bytes even after 150+ s.
+2. fw errors during every session, prime suspects for both:
+   - `VppDec ResetCore(1244): HW polling reached max iterations`
+     (VPP core reset poll timeout — likely DT gap: mainline has only
+     the bus reset, the stock diting node also has video_core_reset
+     from videocc; mainline iris never calls reset_control at all)
+   - `venc_c2SetProperty: Error HFI_PROP_CROP_OFFSETS` (fw rejects the
+     crop property for encoders — vendor sends different crop data)
+   - `Error HFI_PROP_BLUR_TYPES` (drop 0x0300014e from the 0106 family)
+3. Encoding crawls (~75 s/frame) consistent with the wedged VPP.
+
+NEXT: patch 0111 = add video_core_reset to the iris node (videocc
+provider, stock DTB spec 2) + assert/deassert it in the driver power
+path like the vendor; drop BLUR_TYPES; fix encoder CROP_OFFSETS.
+Also queued: error-session module refcnt -1 (unload hangs, D state,
+blocks reboot — needs session cleanup fix).
