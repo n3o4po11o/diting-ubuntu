@@ -61,34 +61,36 @@ DTS = os.path.join(KS, "arch/arm64/boot/dts/qcom/sm8450.dtsi")
 IRIS = os.path.join(KS, "drivers/media/platform/qcom/iris")
 
 # ---------------------------------------------------------------- DT --------
-edit(DTS,
-     "#include <dt-bindings/reset/qcom,sm8450-gpucc.h>\n",
-     "#include <dt-bindings/reset/qcom,sm8450-gpucc.h>\n"
-     "#include <dt-bindings/reset/qcom,sm8350-videocc.h>\n",
-     "DT: videocc reset header")
-
-edit(DTS,
-     "${T}${T}${T}resets = <&gcc GCC_VIDEO_AXI0_CLK_ARES>;\n" +
-     "${T}${T}${T}reset-names = \"bus\";\n",
-     "${T}${T}${T}resets = <&gcc GCC_VIDEO_AXI0_CLK_ARES>,\n" +
-     "${T}${T}${T}${T} <&videocc VIDEO_CC_MVS0C_CLK_ARES>;\n" +
-     "${T}${T}${T}reset-names = \"bus\", \"core\";\n",
-     "DT: iris core reset")
-
-if os.environ.get("ARP_SID_DT") == "I-know-it-hangs-boot":
-    edit(DTS,
-         "<&apps_smmu 0x2187 0x400>;",
-         "<&apps_smmu 0x2187 0x400>,\n" +
-         "${T}${T}${T}${T} <&apps_smmu 0x2184 0x400>;",
-         "DT: iris non-pixel SID 0x2184 (BOOT HANG)")
+if os.environ.get("ARP_DT_PARTS") != "1":
+    print("SKIP DT / platform-data parts: use ARP_DT_PARTS=1 (the DT is no longer the known-good V5 DT; the SID edit hangs the boot)")
 else:
-    print("SKIP DT: iris non-pixel SID 0x2184 -- it hangs the boot; see exp-arp-sid-mask.py")
+    edit(DTS,
+         "#include <dt-bindings/reset/qcom,sm8450-gpucc.h>\n",
+         "#include <dt-bindings/reset/qcom,sm8450-gpucc.h>\n"
+         "#include <dt-bindings/reset/qcom,sm8350-videocc.h>\n",
+         "DT: videocc reset header")
 
-# ---------------------------------------------------------- platform data ---
-edit(os.path.join(IRIS, "iris_platform_vpu2.c"),
-     "static const char * const sm8450_clk_reset_table[] = { \"bus\" };",
-     "static const char * const sm8450_clk_reset_table[] = { \"bus\", \"core\" };",
-     "platform data: bus+core resets")
+    edit(DTS,
+         "${T}${T}${T}resets = <&gcc GCC_VIDEO_AXI0_CLK_ARES>;\n" +
+         "${T}${T}${T}reset-names = \"bus\";\n",
+         "${T}${T}${T}resets = <&gcc GCC_VIDEO_AXI0_CLK_ARES>,\n" +
+         "${T}${T}${T}${T} <&videocc VIDEO_CC_MVS0C_CLK_ARES>;\n" +
+         "${T}${T}${T}reset-names = \"bus\", \"core\";\n",
+         "DT: iris core reset")
+
+    if os.environ.get("ARP_SID_DT") == "I-know-it-hangs-boot":
+        edit(DTS,
+             "<&apps_smmu 0x2187 0x400>;",
+             "<&apps_smmu 0x2187 0x400>,\n" +
+             "${T}${T}${T}${T} <&apps_smmu 0x2184 0x400>;",
+             "DT: iris non-pixel SID 0x2184 (BOOT HANG)")
+    else:
+        print("SKIP DT: iris non-pixel SID 0x2184 -- it hangs the boot; see exp-arp-sid-mask.py")
+
+    edit(os.path.join(IRIS, "iris_platform_vpu2.c"),
+         "static const char * const sm8450_clk_reset_table[] = { \"bus\" };",
+         "static const char * const sm8450_clk_reset_table[] = { \"bus\", \"core\" };",
+         "platform data: bus+core resets")
 
 # ----------------------------------------------------------- ARP mapping ----
 edit(os.path.join(IRIS, "iris_buffer.c"),

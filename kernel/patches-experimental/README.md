@@ -560,3 +560,77 @@ firmware rejects (`Error in SetProperty HFI_PROP_CROP_OFFSETS`).
   waipio driver never sends that property.
 - The firmware logs `Error in SetProperty HFI_PROP_CROP_OFFSETS` for
   the raw port in every encoder session.
+
+## 2026-11-23 night — SMMU stream match rules, ARP hypothesis falsified, core reset
+
+Every run below was a network `dmesg -w` capture on hardware.
+
+### The SMMU stream match register has a rule the DT form violates
+
+Attempts to give SID 0x2184 (the downstream "non-pixel" stream used for
+the encoder ARP buffer) a translation:
+
+| build | what | result |
+|---|---|---|
+| V6 | DT: `iommus` += `<0x2184 0x400>` (the downstream form) | boot hangs 2/2 right after `preserved 0 boot mappings` |
+| V7 | ARP buffer mapped at 0x01000000 (downstream non-pixel pool), SID untouched | firmware receives addr 0x01000000; still resets |
+| V8/V9/V10/V11 | runtime: widen the mask of the live 0x2180 entry | write takes a synchronous external abort (identical write OK) |
+| V12 | mask as a module parameter, probe-only mode | 0x420 on 0x2180 also rejected |
+| V13/V14 | probe tool `arp_smmu_write` (read / write one entry, dump the table) | table dumped: nothing covers 0x2184 |
+| V15 | rewrite the idle 0x2187 entry to (0x2187, 0x407) | accepted; 0x2184 translated through the iris context bank; encoder still resets on frame 0 |
+| V16 | video core reset (bus + core, as upstream sm8250), nothing else | boots, decode OK; encoder still resets. At 640x480 too |
+
+Rule, measured with the probe tool (one rejected write per boot, it
+leaves the SMMU runtime PM lock held):
+
+- an identical write is always accepted;
+- (X, 0x400) is accepted for every X tried in 0x218x, 0x2190, 0x21a0;
+- with more mask bits, the entry is accepted only when the ID has a 1 at
+  every masked position: (0x2187, 0x404) and (0x2187, 0x407) yes;
+  (0x2180, 0x404/0x420/0x403/0x47f), (0x2184, 0x406), (0x2184, 0x400)
+  no. Bit 10 is exempt (it is don't care on every entry).
+- clearing VALID on the firmware's live 0x2180 entry resets the SoC.
+
+So V6's boot hang is the hardware aborting the driver's SMR write for
+(0x2184, 0x400) during probe; the downstream DT uses that form too, and
+the downstream SMMU driver writes it the same way - why stock accepts it
+is not known (downstream never disables the SMMU: `qcom,skip-init`).
+
+### ARP through SID 0x2184 is not the fix
+
+With 0x2184 translated and the ARP buffer at 0x01000000 the encoder
+resets at the same place. The downstream ARP routing is a fidelity gap,
+not the blocker.
+
+### Where the firmware log stops (V16, furthest so far)
+
+Worker: `Prepare VPP session Level SWIs`, `VenusVencPrepareBSEReg`,
+`VenusVencMEPostProcess` - then the SoC resets before the next debug
+queue flush. In the old v9 log the next lines were `VBUF_NewEx`,
+`WorkerAcquireBuffer: bin_buffer_ptr`, `HXU_HACK: SWI programming`,
+`Venc frame No. 0`, `VPPSG start VPPSG task for frame 0`, system error
+0x5000002 (SLV_ERR).
+
+### Not tested / not resolved
+
+- `HFI_PROP_PROFILE` and `HFI_PROP_LEVEL` go out as 0 in the traces
+  although EXPERIMENT-0105 forces 4/14 when the cap is 0: some other
+  sender bypasses the fallback (likely the control handler
+  `iris_set_profile()`); the firmware logs "Changing level ... incorrect
+  input level".
+- the firmware rejects `HFI_PROP_CROP_OFFSETS` on the raw port in every
+  encoder session (mainline sends it on both planes, downstream only on
+  the bitstream port).
+- mainline sends `HFI_PROP_COMV_BUFFER_COUNT = 4`; downstream never sends
+  it for this firmware.
+- input format: only linear NV12 was tried.
+- the firmware's own error is never delivered; a firmware-side trace
+  (the original "boot the vendor kernel" plan) is still the way to see
+  what the VPP hits on frame 0.
+
+### State left behind
+
+Phone: formal series only (boot and vendor_boot = `release/formal-7.2.10-52`
+on the Mac; module from the same build): decoder registered, encoder off,
+decode regression passes. The experimental builds are in
+`release/enc-series-v2/` (v5..v16 debs and images).

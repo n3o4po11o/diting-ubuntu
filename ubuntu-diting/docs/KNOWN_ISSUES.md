@@ -402,12 +402,17 @@ and poweroff for cold reboots).
 
 ## Video: two traps found while working on the encoder (2026-11-23)
 
-**Never list SID 0x2184 in the iris DT node.** Adding it to `iommus` stops
-the boot right after `arm-smmu 15000000.iommu: preserved 0 boot mappings`
-(black screen, no USB gadget, no SSH), reproduced twice, with the kernel
-and initramfs byte-identical to a working image. The screen freezes before
-any "Adding to iommu group" line. Mechanism unknown. Recovery: force a
+**Never list SID 0x2184 in the iris DT node.** Adding it to `iommus` in the
+downstream form (`<0x2184 0x400>`) stops the boot right after
+`arm-smmu 15000000.iommu: preserved 0 boot mappings` (black screen, no USB
+gadget, no SSH), reproduced twice, with the kernel and initramfs
+byte-identical to a working image. Cause, measured later with a register
+probe: while the SMMU is enabled the hardware aborts stream match writes
+whose ID is not the top of the range its mask covers (bit 10 excepted);
+the driver's write for that entry dies during probe. Recovery: force a
 reboot into fastboot and flash a boot/vendor_boot pair built without it.
+Mapping 0x2184 at runtime (accepted as `(0x2187, 0x407)`) does not fix
+the encoder either.
 
 **Do not skip HFI_PROP_INTRA_FRAME_POWER_COLLAPSE.** Not sending it makes
 the VPP core unusable for decoding as well: every session logs

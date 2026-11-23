@@ -1,17 +1,28 @@
 #!/usr/bin/env python3
-"""EXPERIMENT (never committed as is): make the VPU "non-pixel" master SID
-reachable for the iris domain at runtime.
+"""EXPERIMENT (never committed as is): route the VPU "non-pixel" master SID
+(0x2184) through the iris context bank at runtime.
 
-Downstream routes the encoder ARP buffer through venus_sec_non_pixel, i.e.
-the hardware fetches the register programming stream with SID 0x2184. The
-mainline iris node only lists SIDs 0x2180 and 0x2187, so that fetch has no
-translation. Listing 0x2184 in the DT hangs the boot at the apps SMMU probe
-(reproduced twice, mechanism unknown), so this is done from the driver at the
-first encoder session instead: widen the mask of the existing 0x2180 stream
-match entry to cover 0x2180-0x21ff. One MMIO write, the context bank is not
-touched. Controlled by the module parameter arp_sid_alias (default on).
+Downstream maps the encoder ARP buffer through venus_sec_non_pixel (SID
+0x2184). The mainline iris node only lists SIDs 0x2180 and 0x2187. Adding
+0x2184 to the DT with the downstream form (<0x2184 0x400>) hangs the boot,
+and writing that form at runtime aborts: measured on hardware, the apps
+SMMU only accepts a stream match entry whose ID has 1s at every masked
+bit position (bit 10 is exempt, every entry has it as don't care), i.e.
+the ID must be the TOP of the range its mask covers:
 
-Requires exp-arp-reset.py's ARP mapping part (ARP at 0x01000000) to be applied.
+    accepted:  (0x2187, 0x404) -> 0x2183..0x2187     (0x2184, 0x400)
+               (0x2187, 0x407) -> 0x2184..0x2187
+    rejected:  (0x2184, 0x400), (0x2180, 0x404), (0x2180, 0x420),
+               (0x2184, 0x406), ...  synchronous external abort on the write
+
+So the idle 0x2187 entry (the pixel stream, same context bank) is rewritten
+to (0x2187, 0x407), which covers the pixel stream and 0x2184 alike. The
+firmware's live entry (0x2180) is never touched.
+
+RESULT on hardware: the entry is accepted and 0x2184 is translated, but the
+encoder still resets the SoC on frame 0. Keep for the record only.
+
+Requires the ARP mapping part of exp-arp-reset.py (ARP at 0x01000000).
 Usage: python3 exp-arp-sid-mask.py <kernel-src-dir>
 """
 import sys, os
@@ -49,12 +60,18 @@ edit("#define IRIS_ARP_IOVA\t\t0x01000000\n",
      "static bool arp_sid_alias = true;\n"
      "module_param(arp_sid_alias, bool, 0644);\n"
      "\n"
+     "#define IRIS_SMMU_BASE\t\t0x15000000ul\n"
+     "#define IRIS_SMMU_SMR(n)\t\t(0x800 + (n) * 4)\n"
+     "#define IRIS_SMR_ID\t\t\tGENMASK(14, 0)\n"
+     "#define IRIS_SMR_MASK\t\tGENMASK(30, 16)\n"
+     "\n"
      "static int iris_arp_sid_alias(struct device *dev)\n"
      "{\n"
      "${T}struct device *smmu_dev;\n"
      "${T}void __iomem *base;\n"
      "${T}u32 reg, rd;\n"
-     "${T}int idx, stride, ret;\n"
+     "${T}int idx, ret;\n"
+     "${T}const u32 want = 0x84072187; /* VALID | mask 0x407 | ID 0x2187 */\n"
      "\n"
      "${T}if (!arp_sid_alias)\n"
      "${T}${T}return 0;\n"
@@ -71,37 +88,35 @@ edit("#define IRIS_ARP_IOVA\t\t0x01000000\n",
      "${T}}\n"
      "\n"
      "${T}ret = -ENODEV;\n"
-     "${T}base = ioremap(0x15000000, 0x10000);\n"
+     "${T}base = ioremap(IRIS_SMMU_BASE, 0x10000);\n"
      "${T}if (!base) {\n"
      "${T}${T}ret = -ENOMEM;\n"
      "${T}${T}goto out;\n"
      "${T}}\n"
      "\n"
-     "${T}/* GR0 SMRn at 0x800: ID[14:0], MASK[30:16] (+VALID[31] without EXIDS) */\n"
-     "${T}for (stride = 4; stride <= 16; stride += 12) {\n"
-     "${T}${T}for (idx = 0; idx < 128; idx++) {\n"
-     "${T}${T}${T}reg = readl_relaxed(base + 0x800 + idx * stride);\n"
-     "${T}${T}${T}if ((reg & 0x7fff) == 0x2180 &&\n"
-     "${T}${T}${T}    (((reg >> 16) & 0x7fff) == 0x400 ||\n"
-     "${T}${T}${T}${T} ((reg >> 16) & 0x7fff) == 0x47f))\n"
-     "${T}${T}${T}${T}goto found;\n"
-     "${T}${T}}\n"
+     "${T}for (idx = 0; idx < 128; idx++) {\n"
+     "${T}${T}reg = readl_relaxed(base + IRIS_SMMU_SMR(idx));\n"
+     "${T}${T}if ((reg & IRIS_SMR_ID) == 0x2187)\n"
+     "${T}${T}${T}goto found;\n"
      "${T}}\n"
-     "${T}dev_err(dev, \"apps SMMU: no stream match entry for SID 0x2180\\n\");\n"
+     "${T}dev_err(dev, \"apps SMMU: no stream match entry for SID 0x2187\\n\");\n"
      "${T}goto unmap;\n"
      "\n"
      "found:\n"
      "${T}/* the SMMU driver rewrites its entries after runtime suspend */\n"
-     "${T}if (((reg >> 16) & 0x7fff) == 0x47f) {\n"
+     "${T}if (reg == want) {\n"
      "${T}${T}ret = 0;\n"
      "${T}${T}goto unmap;\n"
      "${T}}\n"
-     "${T}rd = (reg & ~GENMASK(30, 16)) | (0x47f << 16);\n"
-     "${T}writel_relaxed(rd, base + 0x800 + idx * stride);\n"
-     "${T}rd = readl_relaxed(base + 0x800 + idx * stride);\n"
-     "${T}dev_info(dev, \"apps SMMU SMR[%d]: %#x -> %#x (SID 0x2180-0x21ff share the iris context bank)\\n\",\n"
+     "${T}if ((reg & IRIS_SMR_MASK) != FIELD_PREP(IRIS_SMR_MASK, 0x400)) {\n"
+     "${T}${T}dev_err(dev, \"apps SMMU SMR[%d] = %#x: unexpected mask\\n\", idx, reg);\n"
+     "${T}${T}goto unmap;\n"
+     "${T}}\n"
+     "${T}writel_relaxed(want, base + IRIS_SMMU_SMR(idx));\n"
+     "${T}rd = readl_relaxed(base + IRIS_SMMU_SMR(idx));\n"
+     "${T}dev_info(dev, \"apps SMMU SMR[%d]: %#x -> %#x (SID 0x2184..0x2187 share the iris context bank)\\n\",\n"
      "${T}${T} idx, reg, rd);\n"
-     "${T}ret = (rd == ((reg & ~GENMASK(30, 16)) | (0x47f << 16))) ? 0 : -EIO;\n"
+     "${T}ret = (rd == want) ? 0 : -EIO;\n"
      "\n"
      "unmap:\n"
      "${T}iounmap(base);\n"
