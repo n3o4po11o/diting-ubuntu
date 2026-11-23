@@ -372,3 +372,30 @@ Next steps when picking this up:
   log-level only and the config sweep touches nothing audio-related).
 - Decisive test: extract the EEA firmware_mnt's adsp image from an EEA
   fastboot ROM and run it with the CN extraction for everything else.
+
+## Kernels after r51 black-screened at boot: initramfs lost e2fsck (2026-11-23, RESOLVED)
+
+Every -52-era boot image hung before the rootfs came up (PID 1 stuck in
+do_wait inside the initramfs, black screen, no SSH), while the r51 images
+booted reliably. The kernel and DT were exonerated by diffing the
+decompiled DTBs (only camera nodes differ). The real difference was the
+RAMDISK: builds after r51 had lost /usr/sbin/e2fsck, fsck and logsave.
+
+Mechanism: the root fstab entry is `LABEL=diting-root` (fsck pass 1),
+and the initramfs-tools fsck hook resolves that device on the BUILD
+SERVER to identify the filesystem type. When a diting-root labelled
+image happens to be attached during the build, the hook works; without
+one (the normal case since Nov 22) it silently skips, the initramfs
+ships without fsck binaries, and the boot waits forever at the root
+fsck step. A build-environment flake that looked like a kernel
+regression.
+
+Fix (deterministic): `FSTYPE=ext4` in the device package's
+initramfs-tools conf.d, so the hook never needs to resolve the device.
+The hot-fixed work/rootfs and the committed package source both carry
+it; any fresh `make rootfs` picks it up automatically.
+
+Rescue tooling for a hung boot: `diting.debug=usb` on the cmdline gives
+a root shell on the USB ACM serial (see scripts/serial-fsck.py —
+e2fsck over serial; the same channel also carries module/file pushes
+and poweroff for cold reboots).
