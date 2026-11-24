@@ -1,0 +1,63 @@
+qmi: the first active slot with a SIM is the primary one
+
+Several physical slots may be active at the same time: the SM8475 modem
+of the Redmi K50 Ultra (diting) reports both of them as active, mapped
+to logical slots 1 and 2. uim_get_slot_status_ready() stored every
+active slot as the primary one, so the last one won. With the SIM in
+slot 1, ModemManager reported the empty slot 2 as the active one, took
+no primary SIM from the slot list, and created a second SIM object for
+the card from the card status: the desktop showed no SIM in the active
+slot and the primary SIM slot was wrong, while the modem was registered.
+
+Take the first active slot that has a SIM as the primary one, and the
+last active slot only when none of them has one, as before. Only the SIM
+in the primary slot is active. Modems with a single active slot are not
+affected.
+---
+ src/mm-shared-qmi.c |   26 ++++++++++++++------
+ 1 file changed, 20 insertions(+), 6 deletions(-)
+
+diff --git a/src/mm-shared-qmi.c b/src/mm-shared-qmi.c
+--- a/src/mm-shared-qmi.c
++++ b/src/mm-shared-qmi.c
+@@ -3374,6 +3374,23 @@
+     }
+ 
+     ctx->sim_slots = g_ptr_array_new_full (physical_slots->len, (GDestroyNotify) sim_slot_free);
++
++    /* Several slots may be active at the same time, e.g. in dual standby.
++     * The primary one is the first active slot that has a SIM; the last
++     * active slot only when none of them has one. Taking the last active
++     * slot made an empty slot the primary one whenever the SIM was in
++     * another one, and a second SIM object was created for the card. */
++    for (i = 0; i < physical_slots->len; i++) {
++        QmiPhysicalSlotStatusSlot *slot_status;
++
++        slot_status = &g_array_index (physical_slots, QmiPhysicalSlotStatusSlot, i);
++        if (slot_status->physical_slot_status != QMI_UIM_SLOT_STATE_ACTIVE)
++            continue;
++        ctx->active_logical_id = slot_status->logical_slot;
++        ctx->active_slot_number = i + 1;
++        if (slot_status->iccid->len)
++            break;
++    }
+ 
+     for (i = 0; i < physical_slots->len; i++) {
+         QmiPhysicalSlotStatusSlot      *slot_status;
+@@ -3385,13 +3402,10 @@
+         g_autoptr(GError)               inner_error = NULL;
+         gboolean                        sim_active = FALSE;
+ 
+-        /* Store active slot info */
++        /* only the SIM in the primary slot is active */
+         slot_status = &g_array_index (physical_slots, QmiPhysicalSlotStatusSlot, i);
+-        if (slot_status->physical_slot_status == QMI_UIM_SLOT_STATE_ACTIVE) {
+-            sim_active = TRUE;
+-            ctx->active_logical_id = slot_status->logical_slot;
+-            ctx->active_slot_number = i + 1;
+-        }
++        if (slot_status->physical_slot_status == QMI_UIM_SLOT_STATE_ACTIVE)
++            sim_active = (ctx->active_slot_number == i + 1);
+ 
+         if (!slot_status->iccid->len) {
+             mm_obj_dbg (self, "not creating SIM object: no SIM in slot %u", i + 1);

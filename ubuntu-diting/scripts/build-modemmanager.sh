@@ -7,11 +7,15 @@
 #
 #   0001: netlink use-after-free (upstream 9317cbc4); ModemManager crashed
 #         with SIGSEGV when it re-created the data link after a resume.
+#   0002: the modem stays across suspend (the quick hooks as the default).
+#   0003: SIM slots: the first active slot with a SIM is the primary one.
+# Raise LOCAL_SUFFIX for every patch added: the version is what tells the
+# builds apart on a phone.
 . "$(dirname "$0")/lib.sh"
 . "$(dirname "$0")/lib-buildd.sh"
 
 MM_VERSION="${MODEMMANAGER_VERSION:-1.25.95-1ubuntu1}"
-LOCAL_SUFFIX="diting2"
+LOCAL_SUFFIX="diting3"
 PKG="$UD/packages/modemmanager"
 
 buildd_setup
@@ -35,7 +39,7 @@ done
 inch sh -ec "cd $src && QUILT_PATCHES=debian/patches quilt push -a -q > /dev/null && quilt pop -a -q > /dev/null"
 inch sh -ec "cd $src && DEBFULLNAME='ubuntu-diting local build' DEBEMAIL=ubuntu-diting@localhost \
 	dch -v ${MM_VERSION}${LOCAL_SUFFIX} -D $UBUNTU_SUITE --force-distribution \
-	'Local Diting build: upstream netlink use-after-free fix (9317cbc4).'"
+	'Local Diting build: the patches in packages/modemmanager (see its README).'"
 
 log "installing build dependencies"
 inch sh -ec "cd $src && apt-get -y -q build-dep --no-install-recommends ." > /dev/null
