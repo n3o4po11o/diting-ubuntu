@@ -112,7 +112,9 @@ in `docs/BRINGUP_STATUS.md`.
   fastrpc allocator); mobile data was lost after every suspend (ModemManager
   removed the modem; now quick suspend/resume) and ModemManager 1.25.95
   crashed re-creating the data link after a resume (local rebuild with the
-  upstream fix, pinned). Kernel r40 (patch 0085): the fastrpc driver lost
+  upstream fix, pinned; the phone ran two days without that fix in November
+  2026, see the 2026-11-24 section at the end). Kernel r40 (patch 0085): the
+  fastrpc driver lost
   one DSP request per suspend (the freezer interrupted adsprpcd's listener
   wait), so the first voice-graph opens after N suspends failed and calls
   had no audio; owner-tested call after 3 suspends with audio. Kernel r41
@@ -270,7 +272,17 @@ on the test phone now sets 10 s (applies only after systemd-sysctl).
 
 - Mobile data APN: a NetworkManager `gsm` connection, e.g.
   `nmcli c add type gsm ifname '*' con-name mobile gsm.apn <apn>`. Odido uses
-  `smartsites.t-mobile`. Wi-Fi keeps the lower route metric.
+  `smartsites.t-mobile`. Wi-Fi keeps the lower route metric. Give the
+  connection `connection.autoconnect-retries 1` as well: NetworkManager
+  starts the next activation 2 ms after a failed one (2026-11-24, below).
+- Network mode: `/etc/diting/modem-mode`, e.g. `allowed="3g|4g|5g"` and
+  `preferred="5g"`, is set on every boot (`diting-modem-setup` and
+  `diting-modem-mode.service`). The desktop's mobile network settings do not
+  survive a boot; without the file every technology is allowed (2026-11-24,
+  below).
+- Same file, for an LTE-only carrier such as China Telecom:
+  `usage="data"` and `service_domain="ps-only"` (`diting-nas-pref` at boot;
+  2026-11-25, below). Leave them out where 2G/3G calls and SMS must work.
 - rmtfs runs read-only (`-r`): modem EFS changes do not persist, which is why
   `diting-modem-setup` re-applies the USIM session and RAT preference each boot.
 
@@ -445,3 +457,247 @@ Rescue tooling for a hung boot: `diting.debug=usb` on the cmdline gives
 a root shell on the USB ACM serial (see scripts/serial-fsck.py —
 e2fsck over serial; the same channel also carries module/file pushes
 and poweroff for cold reboots).
+
+## ModemManager segfaulted on every failed dial: the phone ran a build without the netlink fix (2026-11-24, RESOLVED same day)
+
+For as long as the network did not accept dials, ModemManager died with
+SIGSEGV every few minutes: 12 times in 75 minutes that evening. systemd
+restarted it each time (about 30 s without a modem, then the next dial),
+so it showed as "mobile data dies intermittently" and kept the redial
+watchdog busy.
+
+Four cores (systemd-coredump) show the same crash: PC 0x30, the return
+address in `netlink_messages_cb`, and below it `netlink_setlink_ready`.
+That is the netlink use-after-free of upstream 9317cbc4, which
+`packages/modemmanager/0001` fixes: the completion handler called the
+function pointer it read from the transaction it had just freed. It does
+not need a suspend. When dials fail in quick succession (next section)
+the netlink transactions of the `qmapmux0.0` link follow each other fast
+enough for the freed memory to be reused; the old binary crashed within
+five such links.
+
+The phone did not have that fix. Its package said
+`1.25.95-1ubuntu1diting2` and `dpkg -V` was clean, but it came from
+`/tmp/mm2.deb` (installed 2026-11-22 07:40 going by the apt log), two
+minutes before the build with both patches was written on the build
+host. The disassembly of the call site tells the two apart: that binary
+loads the pointer from the freed object, the build of this repository
+loads it into a register before the free. It had 0002, the quick suspend
+hooks, and not 0001.
+
+Fix: `modemmanager` and `libmm-glib0` reinstalled from `output/debs/` on
+the build host. The build is reproducible: the rebuild has the build-ids
+of the November 22 packages. In its first 83 minutes the rebuilt binary
+went through 72 dials and 17 link creations without a crash. The check
+for any phone is in `packages/modemmanager/README.md`; the package
+version cannot show it. Every ModemManager observation on this phone
+between those two dates was made without the fix, whatever the version
+said.
+
+## NetworkManager dialled twelve times in a second after a failed connect (2026-11-24, MITIGATED)
+
+With debug logging on NetworkManager, one activation is up to three
+dials: `modem-broadband` tries ip type `ipv4v6`, then `ipv4`, then `ipv6`.
+When all three fail, the device goes to failed and the policy
+auto-activates the same connection again 2 ms later (the errors, `cm
+error: unknown` and `pdn-ipv4-call-throttled`, are "unmapped": the
+failure reason is unknown, so nothing holds the connection back). With
+the default of four tries that is 12 dials in under a second, each
+creating and deleting a `qmapmux0.0` link and asking the network for a
+PDN connection. Every failed dial thus became twelve, which prolongs the
+modem's PDN throttle, and it gave the use-after-free above its window.
+
+Mitigation on the owner's phone: `connection.autoconnect-retries 1` on
+the gsm connection. Before, a failed autoconnect was followed by the
+next one within 5 ms; after, the same failure (registration timeout) was
+not followed by another autoconnect, and the next dial came from
+`diting-modem-redial`, which has the 15-minute back-off. The three ip
+types and the missing back-off are NetworkManager's; not changed here.
+
+## The network mode fell back to "2G preferred" after every boot (2026-11-24, RESOLVED)
+
+The mode chosen in the desktop's mobile network settings (3G, 4G, 5G,
+prefer 5G) lasted through ModemManager restarts and a modem firmware
+restart; after a boot the settings showed 2G, 3G, 4G, 5G with 2G
+preferred again. The modem keeps the mode in its EFS, which rmtfs does
+not write back, and `diting-modem-setup` allowed every technology on
+every boot. It has to: left alone the modem stays on GSM only, which
+leaves an LTE-only carrier without service. Nothing set the preferred
+technology, so it was whichever came first in the modem's acquisition
+order.
+
+Now the boot script allows what `/etc/diting/modem-mode` names, and
+`diting-modem-mode.service` hands the same file to ModemManager once it
+runs. That second step is needed because only ModemManager can set the
+preferred technology: qmicli cannot set the acquisition order. Measured
+on the modem, starting from "2G preferred":
+
+| step | mode preference | acquisition order |
+| --- | --- | --- |
+| boot script alone | `umts, lte, 5gnr` | `umts, lte, 5gnr, gsm`: 3G preferred |
+| then `apply-mode` | `umts, lte, 5gnr` | `5gnr, lte, umts, gsm`: 3G, 4G, 5G, prefer 5G |
+
+Without the file every technology is allowed, as before. A mode chosen
+in the desktop lasts until the next boot; to keep it, put it in the
+file. Both steps were run by hand on the live modem first; the next
+boot then showed 3G, 4G, 5G with 5G preferred (owner-checked; the unit
+finished 50 s after boot).
+
+## A SIM moved to the other slot while the system runs (2026-11-25, RESOLVED on the owner's phone)
+
+First real test: a boot with the SIM in slot 2, the card moved to slot 1
+at 75 s.
+
+With the first version of the recovery (activate the session, restart
+ModemManager only):
+
+- 75 s: the SIM switch made ModemManager re-probe; its new objects failed
+  with "GW primary session index unknown": no session for slot 1.
+- 137 s: the watchdog's "modem gone" branch restarted ModemManager.
+  Without a usable SIM it needs 70 s to expose a modem, and two polls
+  without one counted as a lost modem.
+- 198 s: "SIM swapped: session activated". The session on slot 1 was
+  activated, ModemManager restarted, the modem registered.
+- 218 s: NetworkManager dialled. Six seconds later the dial failed
+  (`CallFailed`, cm 1140) and the modem began to throttle PDN calls; the
+  next activation got `pdn-ipv4-call-throttled`. With
+  `autoconnect-retries 1` nothing dialled after that and the watchdog
+  backed off for 15 minutes: no data.
+- By hand at 01:35: a modem firmware restart, then ModemManager: the
+  first dial went through, 66 s after the start.
+
+What changed in `diting-modem-redial` (device 0.7.35):
+
+- `diting-modem-setup ensure-session` alone decides whether a card has no
+  session. The check no longer waits for ModemManager to expose the
+  modem, so the recovery starts within a minute of the card being
+  inserted.
+- The recovery restarts the modem firmware as well
+  (`restart_modem_fw`, the watchdog's third level), because the modem
+  keeps the state of the card that left.
+- A ModemManager younger than 90 s is not "missing".
+
+Measured afterwards with the session removed by hand: the watchdog acted
+at +63 s, the modem ran again at +68 s, the session was back at +73 s,
+connected at +131 s with the first dial. A real tray swap with this
+version had not been done when this was written.
+
+The test also showed two other things, each with its own section below:
+ModemManager reported the active SIM slot wrongly with the card in slot
+1, and the registration kept dropping with the card in either slot.
+
+## ModemManager showed no SIM in the active slot with the SIM in slot 1 (2026-11-25, RESOLVED: modemmanager diting3)
+
+The modem reports both physical slots as active (dual standby, mapped to
+logical slots 1 and 2). `uim_get_slot_status_ready()` in `mm-shared-qmi.c`
+stored every active slot as the primary one, so the last one won. With the
+SIM in slot 2 that happened to be right. With it in slot 1 ModemManager
+showed `slot 2: none (active)`, took no primary SIM from the slot list,
+and created a second SIM object for the card from the card status
+(`SIM/1`, next to `SIM/0` in slot 1). The desktop showed no SIM in the
+active slot while the modem was registered and data worked. A modem and
+ModemManager restart did not change that; upstream main has the same code
+(checked 2026-11-25).
+
+`packages/modemmanager/0003` takes the first active slot that has a SIM as
+the primary one, the last active slot only when none of them has one;
+only that SIM is active. Modems with one active slot are not affected.
+Measured with diting3 and the SIM in slot 1: `slot 1: SIM/0 (active)`,
+`primary-sim-slot 1`, one SIM object.
+
+## The registration dropped every few minutes on an LTE-only carrier (2026-11-25, RESOLVED on the owner's phone)
+
+With the China Telecom SIM the modem registered, held it for 22 seconds to
+4 minutes 44 seconds, then searched for minutes (12 minutes from 22:04,
+more than 10 from 22:55), over and over,
+in whichever slot the card was. ModemManager reported
+`network-rejection-error: cs-domain-not-available`; RSRP was -84 dBm while
+registered, so not coverage, and it happened in a boot without a single
+suspend. The modem was voice-centric with the CS and PS domains and CS
+voice preferred (where it takes that from was not checked), and the
+network had no CS domain for it.
+
+QMI NAS "Set System Selection Preference" has the usage, voice domain and
+service domain preferences as fields (0x21, 0x23, 0x18); qmicli does not
+send them. `diting-nas-pref` does (python3-gi with gir1.2-qmi-1.0).
+`usage="data"` and `service_domain="ps-only"` in `/etc/diting/modem-mode`
+are applied by `diting-modem-setup` on every boot (device 0.7.35); the
+modem keeps them over ModemManager and modem firmware restarts.
+
+- Before: 2 losses in 10 minutes. After, in 67 minutes: none on its own;
+  the two longest stretches between ModemManager restarts, 14 and 15
+  minutes, stayed registered; no network rejection reported any more.
+- 7 blips of 5 to 24 seconds in that hour, each 22 to 24 seconds after
+  one of seven ModemManager starts. ModemManager's start makes the modem
+  re-select once; it is seen in earlier logs too.
+- Not isolated which of the two settings matters; the voice domain is
+  still CS preferred. Calls do not work in this mode: next section.
+- The modem applies the fields asynchronously and invalidates the QMI
+  client that asked, and writing them reorders the acquisition order
+  (the preferred technology became 3G once). At boot
+  `diting-modem-mode.service` sets the preferred technology after them;
+  by hand, `diting-modem-setup apply-mode` does the same.
+
+Not taken: the carrier configuration. The firmware has
+`mcfg_sw/generic/China/CT/Commercial/VoLTE_OpenMkt`, the modem had no
+China Telecom configuration loaded, but `qmicli --pdc-load-config`
+segfaults: libqmi 1.38 frees the pointer into the mapped file after
+computing the checksum (`qmicli-pdc.c`, `load_config_file_from_string`;
+upstream main has it too).
+
+## A ModemManager restart cost five minutes of mobile data (2026-11-25, RESOLVED)
+
+Every ModemManager restart with a data connection up made the first dial
+of the new ModemManager fail after six seconds (`CallFailed`, cm 1140),
+the next ones `pdn-ipv4-call-throttled` / `pdn-ipv6-call-throttled`; five
+of five, on upgrade, on restart by hand and after the crashes of
+2026-11-24. A dial five minutes later went through (02:31:49, 02:46:15).
+A restart with no connection up was followed by a good first dial, four
+of four. The 15-minute back-off of `diting-modem-redial` was waiting for
+this.
+
+Not a call left in the modem: read through a WDS client bound to mux id
+1, the call is `disconnected` within a second of ModemManager dying. What
+matters is how it ended. A disconnect by the ModemManager that owns it
+(`nmcli connection down`) was followed by a good dial three seconds
+later.
+
+- `diting-mm-stop` is now `ExecStop=` of ModemManager.service (drop-in
+  `50-diting-clean-disconnect.conf`): it deactivates the gsm connection
+  through the running ModemManager (`nmcli --wait 10 connection down`),
+  then sends it SIGTERM. With `ExecStop=` set systemd sends no signal of
+  its own. A first version said `nmcli --timeout` (there is no such
+  option) and let the error through: the connection stayed up.
+- NetworkManager stops auto-activating a connection it deactivated on
+  request, so nothing dialled once ModemManager was back.
+  `diting-modem-redial` now dials at once in its first three polls after
+  ModemManager was started, whatever its back-off. Its first version
+  waited for two polls and honoured the back-off; 11 minutes without data.
+
+Measured with a connection up, `systemctl restart ModemManager`: the
+hook's disconnect, the restart, the watchdog's dial 59 s later, connected
+77 s after the restart, the first dial through; again 87 s. No throttled
+line. A crash or a SIGKILL cannot be intercepted: the old five minutes
+then.
+
+## Calls on China Telecom: 47 seconds of dialling, then terminated (2026-11-25, OPEN)
+
+`mmcli -m any --voice-create-call` as root (as a user over SSH PolicyKit
+refuses it): the call stays in `dialing` for 47 s, then `terminated
+(unknown)`; it never left the dialing state, so the number was not
+alerted. The PS attachment blips when the call starts (attached,
+detached, attached again within 0.6 s). With data-centric usage and PS
+only there is no CS voice, and the network reported no CS domain: calls
+need VoLTE, i.e. IMS. SMS was not tested.
+
+What there is, and what is missing:
+
+- The modem runs the IMS services (IMSA answers `InvalidOperation` until
+  a client is bound to it).
+- libqmi 1.38 queries only: IMS registration status, IMS services status,
+  the IMS service enable setting, and the IMS PDN (`imsdcm`).
+- The IMS stack itself, SIP registration and call control, runs on the AP
+  in Android (imsdatadaemon, imsrtp, libimsma and the IMS app); none of
+  it is on this image.
+- `diting-voice-call` starts the audio graphs while ModemManager has a
+  call; it has not been exercised here.

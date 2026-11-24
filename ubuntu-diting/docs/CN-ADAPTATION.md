@@ -2,7 +2,7 @@
 
 Everything needed to rebuild, flash and operate the CN variant
 (OS3.0.3.0.VLFCNXM, S5KHM6 wide camera, no Gunyah/pvmfw, PDN
-throttling), worked out 2026-11-21/22. Fixes are commits on the
+throttling), worked out 2026-11-21/24. Fixes are commits on the
 `x86_64-build` branch; document links below.
 
 ## Build environment
@@ -37,6 +37,14 @@ throttling), worked out 2026-11-21/22. Fixes are commits on the
 | arm32 binaries ENOEXEC | SM8475 is asymmetric: only the 3x A710 have AArch32 EL0; kernel gates support behind a cmdline param | `allow_mismatched_32bit_el0` on the cmdline (native arm32 on the A710 cluster) |
 | Modem unstable across the day | MM's suspend handling drops the QRTR modem and the re-scan fails (~1 suspend in 6); watchdog noticed only minutes later | `diting-mm-resume.service`: on every resume, restart MM immediately when `mmcli` sees no modem (0.7.29) |
 | No USB host mode | bring-up DT pinned `dr_mode = "peripheral"`, no role-switch wiring | patch 0098 (r51): otg + usb-role-switch + pmic_glink connector graph; NM ethernet management (0.7.27, docs/OTG.md) |
+| ModemManager segfaults every few minutes while dials fail | the phone ran a ModemManager build without the netlink fix (`packages/modemmanager/0001`): `/tmp/mm2.deb` of 2026-11-22 07:40, labelled `diting2`, with 0002 only; 12 SIGSEGVs in 75 min on 2026-11-24 | reinstall `modemmanager` and `libmm-glib0` from the build host's `output/debs/`; check with `md5sum /usr/sbin/ModemManager` (packages/modemmanager/README.md, KNOWN_ISSUES.md 2026-11-24) |
+| Twelve dials in a second after a failed connect | NetworkManager tries three ip types per activation and auto-activates again 2 ms after a failure, four tries by default; every failed dial became twelve and prolonged the PDN throttle | `connection.autoconnect-retries 1` on the gsm connection (per phone, 2026-11-24); `diting-modem-redial` keeps the retry with its back-off |
+| Network mode back to "2G preferred" after every boot | the modem forgets the mode (rmtfs read-only) and `diting-modem-setup` allowed every technology; nothing set the preferred one | `/etc/diting/modem-mode` and `diting-modem-mode.service` (device 0.7.35) |
+| SIM moved to the other slot while running: `sim-missing`, then no data for a quarter of an hour | the provisioning session is activated at boot only; and the dial after a ModemManager restart with a connection up is refused | watchdog: `diting-modem-setup ensure-session`, then modem and ModemManager restart (device 0.7.35); stop hook below |
+| No SIM in the active slot with the SIM in slot 1 | both slots are active, ModemManager takes the last one as primary (upstream) | modemmanager diting3, patch 0003 |
+| Registration dropping every few minutes, `cs-domain-not-available` | voice-centric UE with CS and PS on a network without a CS domain | `usage="data" service_domain="ps-only"`, `diting-nas-pref` at boot (device 0.7.35) |
+| No data for five minutes after a ModemManager restart with a connection up | the connection ends with the process; the modem treats the call as aborted and throttles PDN calls | `diting-mm-stop` as the stop hook, the watchdog dials right after a start (device 0.7.35) |
+| Calls terminated after 47 s | no CS voice and no IMS | open: VoLTE |
 
 ## Hardware facts (measured, do not re-litigate)
 
@@ -95,8 +103,16 @@ throttling), worked out 2026-11-21/22. Fixes are commits on the
   filesystem repair (`e2fsck -fy /dev/sda37` with PID 1 frozen).
 - Cellular: APN for China Telecom is `ctnet` (`sudo nmcli c add type
   gsm ifname '*' con-name mobile gsm.apn ctnet autoconnect yes`); the
-  redial watchdog recovers hangs; the network throttles PDN calls
-  after heavy churn - leave it alone for 15+ minutes.
+  redial watchdog recovers hangs. A dial refused with `pdn-*-call-throttled`
+  means the modem backs off for about five minutes: don't retry inside
+  that. Reinstall `modemmanager` and `libmm-glib0` from the build host's
+  `output/debs/` only (`packages/modemmanager/README.md`).
+- NetworkManager: give the gsm connection `connection.autoconnect-retries 1`;
+  otherwise every failed dial becomes twelve in a second (2026-11-24).
+- Network mode: `/etc/diting/modem-mode`; the owner's phone has 3G, 4G, 5G
+  with 5G preferred, `usage="data"` and `service_domain="ps-only"`.
+- Voice calls need VoLTE (open); from SSH `mmcli --voice-create-call`
+  works for root only.
 - USB ethernet: docs/OTG.md.
 
 ## Open problems
@@ -107,3 +123,21 @@ throttling), worked out 2026-11-21/22. Fixes are commits on the
    firmware_mnt's adsp image with the rest CN.
 2. HM6 wide camera needs a mainline sensor driver (camregs already
    built by the firmware extraction).
+3. **Registration kept dropping** (2026-11-24, no longer seen after
+   2026-11-25 02:15 on the owner's phone): registered for 22 s to 4 min,
+   then searching for minutes, with no suspend involved. The modem was
+   voice-centric with CS and PS; the network answered
+   `cs-domain-not-available`. `usage="data"` and
+   `service_domain="ps-only"` in `/etc/diting/modem-mode` (device 0.7.35)
+   ended it: no loss on its own in 67 minutes, only a 5 to 24 s blip after
+   each ModemManager start. Not isolated which of the two matters; an
+   EEA SIM with CS calls and SMS was not tried in this mode.
+4. **SIM moved to the other slot while running** (2026-11-25): the
+   watchdog now activates the session and restarts the modem and
+   ModemManager (device 0.7.35), and modemmanager diting3 reports the slot
+   (patch 0003). Verified with the session removed by hand; a real tray
+   swap with this version is still to do.
+5. **VoLTE**: a call stays in `dialing` for 47 s and is terminated; the
+   modem runs the IMS services, libqmi only queries them, and the IMS
+   stack (SIP registration, call control) runs on the AP in Android. See
+   KNOWN_ISSUES.md, 2026-11-25.
