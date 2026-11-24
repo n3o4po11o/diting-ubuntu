@@ -1,0 +1,96 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: royka1 <397414+royka1@users.noreply.github.com>
+Date: Tue, 24 Nov 2026 21:33:16 +0800
+Subject: [PATCH] arm64: dts: qcom: sm8450: Describe the CPU capacities
+
+The CPU nodes carry no capacity-dmips-mhz, so arch_topology falls back
+to 1024 for every CPU and the scheduler cannot tell a Cortex-A510 from
+the Cortex-X2. A CPU-bound thread that starts on cpu0-3 stays there
+for good, capped at the 2016 MHz ceiling of the little cluster, while
+cpu7 idles: a 50M-iteration awk loop takes 7.6 s pinned to cpu0 and
+1.5 s pinned to cpu7.
+
+Add the per-MHz capacities of Qualcomm's downstream Waipio and Cape
+DTBs, which are identical for both SoCs. With the maximum frequencies
+the EPSS LUT reports on an SM8475 this yields cpu_capacity 277 for the
+A510, 832 for the A710 and 1024 for the X2, so util-based load
+balancing sees heavy tasks on the little cores as misfit and moves
+them up.
+
+dynamic-power-coefficient is left out on purpose: the CPU OPPs come
+from the hardware LUT, and adding the coefficient would register an
+energy model and turn on EAS, which is a separate decision.
+
+Signed-off-by: royka1 <397414+royka1@users.noreply.github.com>
+---
+ arch/arm64/boot/dts/qcom/sm8450.dtsi | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/sm8450.dtsi b/arch/arm64/boot/dts/qcom/sm8450.dtsi
+index e8ec25d..5b359a6 100644
+--- a/arch/arm64/boot/dts/qcom/sm8450.dtsi
++++ b/arch/arm64/boot/dts/qcom/sm8450.dtsi
+@@ -61,6 +61,7 @@
+ 			power-domains = <&cpu_pd0>;
+ 			power-domain-names = "psci";
+ 			qcom,freq-domain = <&cpufreq_hw 0>;
++			capacity-dmips-mhz = <1024>;
+ 			#cooling-cells = <2>;
+ 			clocks = <&cpufreq_hw 0>;
+ 			l2_0: l2-cache {
+@@ -85,6 +86,7 @@
+ 			power-domains = <&cpu_pd1>;
+ 			power-domain-names = "psci";
+ 			qcom,freq-domain = <&cpufreq_hw 0>;
++			capacity-dmips-mhz = <1024>;
+ 			#cooling-cells = <2>;
+ 			clocks = <&cpufreq_hw 0>;
+ 			l2_100: l2-cache {
+@@ -104,6 +106,7 @@
+ 			power-domains = <&cpu_pd2>;
+ 			power-domain-names = "psci";
+ 			qcom,freq-domain = <&cpufreq_hw 0>;
++			capacity-dmips-mhz = <1024>;
+ 			#cooling-cells = <2>;
+ 			clocks = <&cpufreq_hw 0>;
+ 			l2_200: l2-cache {
+@@ -123,6 +126,7 @@
+ 			power-domains = <&cpu_pd3>;
+ 			power-domain-names = "psci";
+ 			qcom,freq-domain = <&cpufreq_hw 0>;
++			capacity-dmips-mhz = <1024>;
+ 			#cooling-cells = <2>;
+ 			clocks = <&cpufreq_hw 0>;
+ 			l2_300: l2-cache {
+@@ -142,6 +146,7 @@
+ 			power-domains = <&cpu_pd4>;
+ 			power-domain-names = "psci";
+ 			qcom,freq-domain = <&cpufreq_hw 1>;
++			capacity-dmips-mhz = <2253>;
+ 			#cooling-cells = <2>;
+ 			clocks = <&cpufreq_hw 1>;
+ 			l2_400: l2-cache {
+@@ -161,6 +166,7 @@
+ 			power-domains = <&cpu_pd5>;
+ 			power-domain-names = "psci";
+ 			qcom,freq-domain = <&cpufreq_hw 1>;
++			capacity-dmips-mhz = <2253>;
+ 			#cooling-cells = <2>;
+ 			clocks = <&cpufreq_hw 1>;
+ 			l2_500: l2-cache {
+@@ -180,6 +186,7 @@
+ 			power-domains = <&cpu_pd6>;
+ 			power-domain-names = "psci";
+ 			qcom,freq-domain = <&cpufreq_hw 1>;
++			capacity-dmips-mhz = <2253>;
+ 			#cooling-cells = <2>;
+ 			clocks = <&cpufreq_hw 1>;
+ 			l2_600: l2-cache {
+@@ -199,6 +206,7 @@
+ 			power-domains = <&cpu_pd7>;
+ 			power-domain-names = "psci";
+ 			qcom,freq-domain = <&cpufreq_hw 2>;
++			capacity-dmips-mhz = <2386>;
+ 			#cooling-cells = <2>;
+ 			clocks = <&cpufreq_hw 2>;
+ 			l2_700: l2-cache {
