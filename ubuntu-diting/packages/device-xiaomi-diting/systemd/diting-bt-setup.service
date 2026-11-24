@@ -1,0 +1,18 @@
+[Unit]
+Description=Give the Bluetooth controller its address when the booted device tree has none
+# Runs whenever hci0 appears: every boot, and again after each re-probe of
+# the serial device by diting-hardware-recovery
+BindsTo=sys-subsystem-bluetooth-devices-hci0.device
+After=sys-subsystem-bluetooth-devices-hci0.device
+# coldplug finished: /dev/disk/by-partlabel/persist is there (address source)
+After=systemd-udev-trigger.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/diting/diting-bt-setup
+RemainAfterExit=yes
+# the script gives up by itself within 50 s; a oneshot has no timeout by default
+TimeoutStartSec=75
+
+[Install]
+WantedBy=sys-subsystem-bluetooth-devices-hci0.device

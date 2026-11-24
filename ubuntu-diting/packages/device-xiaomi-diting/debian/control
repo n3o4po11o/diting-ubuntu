@@ -9,7 +9,7 @@ Rules-Requires-Root: no
 Package: device-xiaomi-diting
 Architecture: all
 Depends: ${misc:Depends}, initramfs-tools, mkbootimg, device-tree-compiler, iproute2, python3,
- python3-gi, alsa-utils, alsa-ucm-conf
+ python3-gi, alsa-utils, alsa-ucm-conf, bluez
 Recommends: linux-image-7.2.10-diting, fastrpc-diting, hexagonrpcd-diting, firmware-xiaomi-diting, modemmanager
 Description: Xiaomi 12T Pro / Redmi K50 Ultra (diting) device support
  Device integration for running Ubuntu on the Xiaomi Diting (SM8475):
@@ -19,6 +19,9 @@ Description: Xiaomi 12T Pro / Redmi K50 Ultra (diting) device support
   - initramfs-tools configuration and an opt-in USB debug mode
   - a USB gadget service (NCM network + ACM serial)
   - an APT pin that keeps Ubuntu's generic kernel from being installed
+  - Bluetooth address: diting-bt-setup gives the QCA6490 its address at
+    runtime on every boot whose boot images carry none; diting-bt-fixup
+    writes it into the boot partitions on the first boot
   - voice call audio: diting-voice-call starts the AudioReach voice graphs
     while ModemManager has a call; diting-audiopd runs the ADSP audio PD
     (adsprpcd, fastrpc-diting) for the call's echo/noise cancellation

@@ -1,17 +1,42 @@
 #!/bin/sh
 # Print the Bluetooth address for the QCA6490. The vendor address lives in a
 # partition Linux does not read and the controller reports an invalid one.
-# Uses /etc/diting/bt-address when the owner provides one, else a stable
-# locally administered address derived from the machine id.
-#   diting-bt-address            -> 42:D9:D3:02:D8:08
-#   diting-bt-address --le-bytes -> 08 d8 02 d3 d9 42 (DT local-bd-address)
+# First match wins:
+#   /etc/diting/bt-address          the owner's, or pinned there on first
+#                                   use by diting-bt-setup / diting-bt-fixup
+#   persist:/qca6490/wlan_mac.bin   the factory Wi-Fi address, made locally
+#                                   administered: the same after every rootfs
+#                                   reflash (root only; the partition is
+#                                   mounted read-only under /run)
+#   /etc/machine-id                 hashed: a new address after each reflash
+#   diting-bt-address            -> 96:D3:31:49:57:72
+#   diting-bt-address --le-bytes -> 72 57 49 31 d3 96 (DT local-bd-address)
 set -e
+
+factory_wlan() {	# the Wi-Fi address Xiaomi wrote at the factory: 12 hex digits
+	(
+		set +e
+		[ "$(id -u)" = 0 ] && [ -e /dev/disk/by-partlabel/persist ] || exit 0
+		# /run: writable while the root file system is still read-only
+		m="$(mktemp -d /run/diting-bt-address.XXXXXX)" || exit 0
+		trap 'umount "$m" 2>/dev/null; rmdir "$m" 2>/dev/null' EXIT
+		mount -t ext4 -o ro,noload /dev/disk/by-partlabel/persist "$m" 2>/dev/null || exit 0
+		tr -d '\r\n' 2>/dev/null < "$m/qca6490/wlan_mac.bin" |
+			sed -n 's/^wlan0=\([0-9A-Fa-f]\{12\}\)$/\1/p'
+	)
+}
+
 if [ -s /etc/diting/bt-address ]; then
 	addr="$(tr -d ' \n' < /etc/diting/bt-address)"
 else
-	[ -s /etc/machine-id ] && [ "$(cat /etc/machine-id)" != uninitialized ] ||
-		exit 1	# first boot: no stable id yet
-	h="$(printf '%s-diting-bt' "$(cat /etc/machine-id)" | sha256sum | cut -c1-12)"
+	h="$(factory_wlan)"
+	case "$h" in
+	????????????) ;;		# factory Wi-Fi address
+	*)
+		[ -s /etc/machine-id ] && [ "$(cat /etc/machine-id)" != uninitialized ] ||
+			exit 1	# first boot: no stable id yet
+		h="$(printf '%s-diting-bt' "$(cat /etc/machine-id)" | sha256sum | cut -c1-12)" ;;
+	esac
 	first=$(( (0x${h%??????????} & 0xfc) | 0x02 ))	# locally administered, unicast
 	rest="$(echo "${h#??}" | sed 's/../&:/g; s/:$//' | tr a-f A-F)"
 	addr="$(printf '%02X' "$first"):$rest"

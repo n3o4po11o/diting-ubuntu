@@ -1,0 +1,59 @@
+#!/bin/sh
+# Give the Bluetooth controller its address when the booted device tree
+# carries none. diting-mkbootimg writes local-bd-address only for boot
+# images built on the phone; the ones built on the server (make boot, the
+# release images) have none, and the kernel then starts the QCA6490
+# unconfigured: hciconfig shows DOWN RAW and bluetoothd does not see it.
+# diting-bt-fixup repairs the boot partitions on the first boot only, so do
+# the same at runtime here, each time hci0 appears (every boot, and again
+# after every re-probe by diting-hardware-recovery). Needs no reboot; the
+# address is gone when hci0 goes away. It is pinned in /etc/diting/bt-address.
+#
+# hciconfig shows INIT while the firmware loads and RAW when the controller
+# came up unconfigured.
+hci="${1:-hci0}"
+
+for t in hciconfig btmgmt timeout; do
+	command -v "$t" >/dev/null || { echo "diting-bt-setup: needs $t" >&2; exit 1; }
+done
+info() { hciconfig "$hci" 2>/dev/null | tr -s ' \t\n' ' '; }
+
+# Wait for the first setup of the controller (firmware download).
+i=0
+while :; do
+	s="$(info)"
+	case "$s" in
+	*" INIT "*|*"BD Address: 00:00:00:00:00:00 "*) ;;	# still setting up
+	*" RAW "*) break ;;				# unconfigured: needs an address
+	*"BD Address: "*) echo "diting-bt-setup: $hci already configured"; exit 0 ;;
+	esac	# no answer: hci0 is not there (yet)
+	[ "$i" -lt 60 ] || { echo "diting-bt-setup: $hci did not come up" >&2; exit 1; }
+	sleep 0.5; i=$((i + 1))
+done
+
+addr="$(/usr/lib/diting/diting-bt-address | tr a-f A-F)"
+case "$addr" in
+[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]) ;;
+*) echo "diting-bt-setup: no valid address for $hci" >&2; exit 1 ;;
+esac
+# Pin it: shells without root cannot read the factory address, and the
+# address must not change when the machine id does.
+pin=/etc/diting/bt-address
+if [ ! -s "$pin" ]; then
+	mkdir -p "${pin%/*}" 2>/dev/null && echo "$addr" > "$pin" 2>/dev/null || true
+fi
+# btmgmt adds stdin to its event loop and, when that cannot be polled (the
+# /dev/null a systemd service gets), waits forever without sending the
+# command. Give it an empty pipe, and bound it: the result is checked below.
+: | timeout 10 btmgmt --index "$hci" public-addr "$addr" >/dev/null
+
+# The kernel powers the controller on again with the new address.
+i=0
+while [ "$i" -lt 40 ]; do
+	case "$(info)" in
+	*"BD Address: $addr "*) echo "diting-bt-setup: $hci now has $addr"; exit 0 ;;
+	esac
+	sleep 0.25; i=$((i + 1))
+done
+echo "diting-bt-setup: $hci did not take the address $addr" >&2
+exit 1

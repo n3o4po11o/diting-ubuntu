@@ -25,6 +25,9 @@ enable diting-wifi-band-steer.service
 disable rmtfs-dir.service
 enable diting-modem-redial.service
 enable diting-bt-fixup.service
+# bound to hci0: the Bluetooth address at runtime on every boot whose boot
+# images were built without one (server-built, flashed by fastboot)
+enable diting-bt-setup.service
 enable diting-mm-resume.service
 enable diting-modem-suspend.service
 enable diting-modem-resume.service

@@ -281,10 +281,17 @@ on the test phone now sets 10 s (applies only after systemd-sysctl).
   audio topology and the IPA data were only checked against this one.
 - The vendor partition carries a second main camera (Samsung HM6); units
   with it have no main camera.
-- Bluetooth runs with the controller's own address, apparently a firmware
-  default that may be the same on every phone; the DT `local-bd-address`
-  written by diting-mkbootimg does not take effect. `btmgmt public-addr`
-  can set another one.
+- Bluetooth address: the QCA6490 reports the placeholder of the generic
+  NVM (`00:00:00:00:5A:AD`) and the kernel starts it unconfigured unless
+  it is given one. `diting-bt-address` derives a locally administered
+  address from the factory Wi-Fi address in persist (the same after every
+  reflash; the hashed machine id where there is none). Boot images built
+  on the phone carry it in the device tree (`diting-bt-fixup` writes them
+  on the first boot); server-built ones do not, and `diting-bt-setup`
+  then sets it at runtime on every boot. For an address of your own:
+  `/etc/diting/bt-address`. (Upstream's EEA unit was reported to run with
+  the placeholder instead of starting unconfigured; not seen here, and
+  `diting-bt-setup` leaves such a controller alone.)
 - The default PIN 147147 is public; users must change it (`passwd`). sudo
   asks for it (owner images: no password, key-only SSH).
 - The full image has not been flashed on a phone by the owner; its parts

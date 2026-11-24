@@ -30,6 +30,7 @@ throttling), worked out 2026-11-21/22. Fixes are commits on the
 | SPMI write storm after r47 | AP cannot write the PMK8350 RTC (arbiter denies); kernel NTP sync worker retries 47/s | allow-set-time reverted, rtc-sync removed, r50 |
 | CDSP log flood | duplicate handover IRQ logged at err level | patch 0097, r48 |
 | Bluetooth toggle dead | server-built boot images carry no `local-bd-address` (no machine-id at build time) | `diting-bt-fixup`: first boot persists an address, regenerates the boot images and dd's them to the boot partitions before the firmware-setup reboot (0.7.28) |
+| Bluetooth address lost again after every flash | `diting-bt-fixup` runs once per rootfs (marker); boot images built on the server never carry `local-bd-address`, so after each `fastboot flash` the kernel starts the QCA6490 unconfigured (`DOWN RAW`, invisible to bluetoothd); a rootfs reflash also gives a new machine-id-derived address | `diting-bt-setup.service`: bound to hci0, `btmgmt public-addr` each time the controller comes up unconfigured (every boot, every re-probe; ~2 s, no reboot, no boot partition write). `diting-bt-address` derives the address from the factory Wi-Fi MAC in `persist:/qca6490/wlan_mac.bin` (0.7.34) |
 | UI froze at idle dim | DSI brightness write timed out on the wedged display pipeline | workaround: disable idle blank (KNOWN_ISSUES); recurred once after churn - watch it |
 | Rootfs "clean with errors", growfs blocked | `rw` on the cmdline skips systemd-fsck-root; unclean poweroffs accumulated damage | boot `ro`; fsck runs when the fs carries errors (also the failed-boot pitfall: an fsck that cannot repair drops into emergency with no shell - repair from the initramfs debug shell, see runbook) |
 | UFS bad blocks (EIO on reads) | storage-level, visible as e2fsck I/O errors | full reflash of userdata (fresh ext4, FTL remaps); monitor dmesg |
@@ -51,13 +52,22 @@ throttling), worked out 2026-11-21/22. Fixes are commits on the
 - CN persist on the real unit **does** contain the speaker
   calibration and `qca6490/wlan_mac.bin` (the factory ROM image does
   not - test extraction against real hardware).
+- **The QCA6490 has no Bluetooth address of its own**: with the generic
+  NVM (`hpnv21g.bin`) it reports `00:00:00:00:5A:AD` and the kernel
+  starts it unconfigured unless given one. persist holds only the
+  factory Wi-Fi address (`qca6490/wlan_mac.bin`, text
+  `wlan0=<12 hex digits>`), no Bluetooth one.
+- **`btmgmt` hangs forever when stdin is `/dev/null`** (what a systemd
+  service gets): it adds stdin to its event loop, `/dev/null` cannot be
+  polled (`epoll_ctl` EPERM) and the command is never sent. Give it an
+  empty pipe (`: | btmgmt ...`), as `diting-bt-setup` does.
 
 ## Deliverables
 
 - `release/final-public/`: boot.img, vendor_boot.img, sparse
   rootfs.img, flash script, checksums. PIN 147147, first boot
   self-provisions (clock floor, firmware extraction, Bluetooth
-  address into the boot partitions, one automatic reboot).
+  address into the boot partitions and at runtime, one automatic reboot).
 - `release/final-owner/`: same kernel; built-in debug SSH key
   (`~/.ssh/diting_debug_key` on the Mac), passwordless sudo,
   `diting.debug=usb` initramfs shell.
@@ -68,6 +78,12 @@ throttling), worked out 2026-11-21/22. Fixes are commits on the
   `/etc/kernel/postinst.d/zz-diting-bootimg $(uname -r)` whenever the
   kernel package (re)installs - that is also how the Bluetooth
   address gets in.
+- Server-built boot images (`make boot`, the release images) carry no
+  Bluetooth address. After flashing them `diting-bt-setup` gives the
+  controller its address at runtime, about 2 s after hci0 appears
+  (`journalctl -u diting-bt-setup -b`). The address is derived from
+  the factory Wi-Fi MAC and pinned in `/etc/diting/bt-address`; put an
+  address of your own there to override it.
 
 ## Operational runbook
 

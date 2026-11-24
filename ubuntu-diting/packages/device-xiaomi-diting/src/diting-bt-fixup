@@ -4,7 +4,8 @@
 # local-bd-address DT property and bluetoothd refuses the controller).
 # Persist an address, regenerate the boot images on this machine and
 # write them to the boot partitions; the firmware-setup reboot (or any
-# later reboot) boots them. Runs once (marker in /var/lib/diting).
+# later reboot) boots them. Runs once (marker in /var/lib/diting). Boot
+# images flashed later are covered at runtime by diting-bt-setup.
 set -e
 marker=/var/lib/diting/bt-address-fixed
 [ -e "$marker" ] && exit 0

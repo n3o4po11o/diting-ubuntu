@@ -39,9 +39,22 @@ if [ -n "$dp" ]; then
 	t "device package metadata" dpkg-deb -I "$dp"
 	c="$(dpkg-deb -c "$dp")"
 	for f in usr/sbin/diting-mkbootimg etc/kernel/postinst.d/zz-diting-bootimg \
-		usr/share/initramfs-tools/scripts/init-top/diting-debug etc/diting/bootimg.conf; do
+		usr/share/initramfs-tools/scripts/init-top/diting-debug etc/diting/bootimg.conf \
+		usr/lib/diting/diting-bt-setup usr/lib/systemd/system/diting-bt-setup.service; do
 		t "device package contains $f (executable or config)" grep -q "\./$f" <<<"$c"
 	done
+	# Every boot image built on the server leaves the Bluetooth controller
+	# unconfigured; only the service bound to hci0 gives it its address then.
+	t "diting-bt-setup.service executable in the package" grep -q "^-rwxr-xr-x.*\./usr/lib/diting/diting-bt-setup\$" <<<"$c"
+	# A file missing from the package must cost one FAIL, not abort the run
+	# (verify.sh runs under set -euo pipefail).
+	in_deb() { dpkg-deb --fsys-tarfile "$dp" | tar -xO "./$1" 2>/dev/null || true; }
+	pt="$(in_deb usr/lib/systemd/system-preset/10-diting.preset)"
+	un="$(in_deb usr/lib/systemd/system/diting-bt-setup.service)"
+	t "preset enables diting-bt-setup.service" grep -qx 'enable diting-bt-setup.service' <<<"$pt"
+	t "diting-bt-setup.service is bound to the hci0 device unit" \
+		grep -qx 'BindsTo=sys-subsystem-bluetooth-devices-hci0.device' <<<"$un"
+	t "diting-bt-setup.service has a start timeout" grep -qx 'TimeoutStartSec=[0-9][0-9a-z.]*' <<<"$un"
 	if command -v lintian >/dev/null; then
 		lintian --no-tag-display-limit "$dp" > "$OUT/logs/lintian-device.txt" 2>&1 || true
 		echo "INFO lintian: $(grep -c '^E:' "$OUT/logs/lintian-device.txt") errors, $(grep -c '^W:' "$OUT/logs/lintian-device.txt") warnings (output/logs/lintian-device.txt)"
