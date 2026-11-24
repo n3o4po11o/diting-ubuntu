@@ -8,8 +8,9 @@ so the tools do not depend on the host and a build can be repeated later.
 Nothing here flashes or boots a phone.
 
 The host needs only Docker, a checkout of this tree and network access (and
-`zstd` to save the image). The reference run (2026-11-24, 2 h 32 min) is
-described at the end.
+`zstd` to save the image). GitHub Actions runs the same steps (see GitHub
+Actions, below). The reference run (2026-11-24, 2 h 32 min) is described at
+the end.
 
 ## Files
 
@@ -18,6 +19,9 @@ described at the end.
 | `Dockerfile` | The builder image: Debian 13 with the host packages of `docs/BUILD.md` and what the scripts need in a container. The base image is pinned by digest. |
 | `build-fromzero.sh` | Runs the build stage by stage, times each stage, stops at the first failure, resumes after it. |
 | `pack-artifacts.sh` | Collects a finished build into one directory: the flashable parts, the rootfs image, the release archive, the builder image, checksums. |
+| `lint.sh` | What the lint job of the workflow runs: shellcheck over the shell scripts; an error fails. |
+| `tests.sh` | Tests of the scripts in this directory against stand-ins for make and docker; seconds inside the image. |
+| `run-on-github.sh` | The build job of the workflow: the stages in five parts, with what a finished part no longer needs deleted in between, then steps 3 and 4. |
 
 ## What it needs
 
@@ -30,7 +34,8 @@ described at the end.
   (reference trees), ports.ubuntu.com, packages.mozilla.org and the snap
   store. `--network=host` gives the container the host's resolver.
 - **Disk.** About 65 GB for one run (source clones 6.5 GB, `work/` 41 GB,
-  `output/` 15 GB) plus 3.8 GB for the packed artifacts.
+  `output/` 15 GB) plus 3.8 GB for the packed artifacts. Run in parts with
+  deletion in between, as the workflow does, the peak is about 21 GB.
 - **Time.** Hours; see the stage table. Start the run detached.
 - **No phone data.** `device-data/` is not needed. Without it the header
   comparison against the stock boot images is skipped (`build-release.sh`
@@ -74,6 +79,12 @@ If a stage fails, fix the cause and start the same container again with
 
 `JOBS` is the parallelism of the kernel build. The reference run used 6 on a
 host with 8 cores and 10 GB RAM that was in use at the same time.
+
+To build only some stages, name them in `STAGES`, space separated:
+`-e STAGES="sources packages verify"` gives the device package and the checks
+of it in a few minutes, for a package to try on the phone. Every later call
+on the same tree then needs `--resume`. `DONE` appears only once all ten
+stages have passed, also when they ran in several calls.
 
 ### 3. Save the builder image
 
@@ -206,6 +217,43 @@ build tools all came from the image.
   under `/home/ubuntu/work/` on the phone.
 - Device status: **UNTESTED ON DEVICE**. Nothing of this build was flashed.
 
+## GitHub Actions
+
+`.github/workflows/build.yml` has two jobs.
+
+- **lint**, on every push and pull request, on a hosted x86-64 runner, in a
+  few minutes: builds the image, runs `ci/lint.sh` (shellcheck, an error
+  fails) and `ci/tests.sh` (the tests of the scripts in this directory).
+- **build**, after lint: on pushes to main, on tags `v*`, weekly (Mondays
+  03:23 UTC) and by hand. The whole build from zero and the packing, through
+  `ci/run-on-github.sh`, on a hosted arm64 runner (`ubuntu-24.04-arm`, free
+  for public repositories): the native build of this page. Two workflow
+  artifacts come out, `diting-<rev>` (the directory of the Artifacts
+  section) and `diting-<rev>-logs`, kept for 14 days.
+
+The build of a new push to main replaces the one of the commit before it,
+and commits that only change documentation or the experimental patches start
+nothing. To build on a self-hosted runner instead, set the repository
+variable `BUILD_RUNNER` to its label.
+
+Two things are different on a hosted runner:
+
+- **Disk.** The runner's documented space is 14 GB; one unbroken run needs
+  about 65 GB. `ci/run-on-github.sh` therefore runs the stages in five parts
+  and deletes between them what the later stages do not need: the kernel
+  tree and the owner image after the owner rootfs, each rootfs copy after
+  its package, the owner tree and the reference trees after phoc, and after
+  the packing everything else. That brings the peak to about 21 GB. The
+  workflow also removes the preinstalled SDKs of the runner image, as
+  insurance.
+- **Time.** Four cores, where the reference run had eight and took 2 h 32
+  min. A hosted runner stops a job after 6 hours; the job's timeout is set
+  to 350 minutes.
+
+The workflow has not run on GitHub at the time of writing. Its lint job is
+the first test of the Dockerfile's branch for other architectures, and the
+disk and time figures of the build job are estimates.
+
 ## What building from zero showed
 
 A clean checkout of `main` at 095e359 did not get through unaided.
@@ -238,7 +286,10 @@ itself:
    `config/diting.conf`.
 5. **`make lint` fails.** `packages/device-xiaomi-diting/src/*` in the
    `lint` target includes four Python programs, which shellcheck rejects
-   (SC1071).
+   (SC1071). `ci/lint.sh` is what the workflow runs instead: the same files,
+   with the shell scripts told by their shebang. Over the whole tree
+   shellcheck 0.10.0 reports one more error, outside those files: `SC2045`
+   in `packages/device-xiaomi-diting/debian/postinst`.
 6. **`make image` is not the release.** It builds boot images for the
    initramfs-only debug mode by default (`BOOT_MODE=debug`), and the owner
    image. That is why this flow ends with `make release`.

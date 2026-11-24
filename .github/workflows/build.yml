@@ -1,0 +1,109 @@
+---
+# Builds of this tree in the container made from ci/Dockerfile. ci/BUILD.md
+# has the details.
+#
+#   lint    every push and pull request: the builder image builds, shellcheck
+#           finds no error in the shell scripts, and the tests of the ci
+#           scripts pass
+#   build   pushes to main, tags, weekly and by hand: the whole build from
+#           zero, packaged as workflow artifacts
+name: build
+
+"on":
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "kernel/patches-experimental/**"
+  pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "kernel/patches-experimental/**"
+  schedule:
+    - cron: "23 3 * * 1"  # Mondays 03:23 UTC, on the default branch
+  workflow_dispatch:
+
+# The build of a new push replaces the build of the commit before it.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: >-
+    ${{ github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/') }}
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Shell scripts and builder image (x86-64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the builder image
+        run: >-
+          docker build -t diting-builder:ci
+          --build-arg VCS_REF="$GITHUB_SHA" ubuntu-diting/ci
+      - name: shellcheck
+        run: >-
+          docker run --rm -v "$PWD:/src" -w /src diting-builder:ci
+          ubuntu-diting/ci/lint.sh
+      - name: Tests of the ci scripts
+        run: >-
+          docker run --rm -v "$PWD:/src" -w /src diting-builder:ci
+          ubuntu-diting/ci/tests.sh /src /tmp/ci-tests
+
+  build:
+    name: From zero, packaged
+    needs: lint
+    # A hosted arm64 runner, free for public repositories: the build is the
+    # native one of ci/BUILD.md. To build on a self-hosted runner instead, set
+    # the repository variable BUILD_RUNNER to its label.
+    runs-on: ${{ vars.BUILD_RUNNER || 'ubuntu-24.04-arm' }}
+    timeout-minutes: 350  # a hosted runner stops a job after 6 hours
+    steps:
+      - uses: actions/checkout@v7
+      - name: Short commit
+        run: echo "REV=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+      - name: Free disk space
+        run: |
+          # Insurance for the about 21 GB the build needs at its peak: the
+          # preinstalled SDKs are not used here. /opt/hostedtoolcache stays,
+          # JavaScript actions run on its Node.
+          for d in /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+              /opt/hostedtoolcache/CodeQL /usr/local/.ghcup; do
+            sudo rm -rf "$d"
+          done
+          sudo docker image prune -af >/dev/null
+          df -h /
+      - name: Build the builder image
+        run: >-
+          docker build -t "diting-builder:$REV"
+          --build-arg VCS_REF="$GITHUB_SHA" ubuntu-diting/ci
+      - name: Build from zero and pack the artifacts
+        env:
+          TMP: ${{ runner.temp }}
+        run: ci/run-on-github.sh "$TMP/logs" "$TMP/stage" "$TMP/artifacts"
+      - name: Result of the stages
+        if: always()
+        env:
+          TMP: ${{ runner.temp }}
+        run: cat "$TMP/logs/summary.txt" || true
+      - name: Upload the artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: diting-${{ env.REV }}
+          path: ${{ runner.temp }}/artifacts
+          compression-level: 0  # already compressed: xz and zstd
+          retention-days: 14
+          if-no-files-found: error
+      - name: Upload the logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: diting-${{ env.REV }}-logs
+          path: ${{ runner.temp }}/logs
+          retention-days: 14
+          if-no-files-found: ignore
