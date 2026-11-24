@@ -1,5 +1,10 @@
 # Build
 
+The whole build also runs from zero in a container built from `ci/Dockerfile`,
+with every stage timed and the results packed for upload; that is the
+repeatable way and is described in `ci/BUILD.md`. The rest of this page is
+about building directly on a host.
+
 ## Host
 
 Tested host: Armbian 26.2.1 (Debian 13 trixie), **native aarch64** (CIX P1, 12
