@@ -9,6 +9,8 @@ disable systemd-networkd-wait-online.service
 enable diting-usb-gadget.service
 enable diting-boot-successful.service
 enable diting-modem-setup.service
+# runs only when the owner has /etc/diting/modem-mode
+enable diting-modem-mode.service
 # udev starts it too (90-diting-audiopd.rules); preset-enabling keeps the
 # ADSP log pump (adspmsgd, PD exception logging) running across ADSP
 # restarts that do not re-trigger udev

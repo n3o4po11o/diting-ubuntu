@@ -9,7 +9,7 @@ Rules-Requires-Root: no
 Package: device-xiaomi-diting
 Architecture: all
 Depends: ${misc:Depends}, initramfs-tools, mkbootimg, device-tree-compiler, iproute2, python3,
- python3-gi, alsa-utils, alsa-ucm-conf, bluez
+ python3-gi, gir1.2-qmi-1.0, alsa-utils, alsa-ucm-conf, bluez
 Recommends: linux-image-7.2.10-diting, fastrpc-diting, hexagonrpcd-diting, firmware-xiaomi-diting, modemmanager
 Description: Xiaomi 12T Pro / Redmi K50 Ultra (diting) device support
  Device integration for running Ubuntu on the Xiaomi Diting (SM8475):

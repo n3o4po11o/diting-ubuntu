@@ -3,9 +3,102 @@
 #  - activate the USIM application for the primary GW provisioning session;
 #    without it ModemManager fails with "GW primary session index unknown"
 #    (same job as postmarketOS msm-modem-uim-selection).
-#  - allow all radio technologies; the modem NV defaults to GSM only, and
-#    rmtfs runs read-only (-r) so changes made by the modem do not persist.
+#  - allow radio technologies: the modem NV defaults to GSM only, and rmtfs
+#    runs read-only (-r), so nothing the modem is told persists over a boot.
+#    All technologies, or the ones /etc/diting/modem-mode names; that file is
+#    also what "apply-mode" (diting-modem-mode.service, once ModemManager
+#    runs) hands to ModemManager, because only ModemManager can set the
+#    preferred technology: the modem's acquisition order.
+#  - the usage and the service domain the file names: a voice-centric UE
+#    with CS and PS asks for a CS domain on every attach, and an LTE-only
+#    carrier refuses it. qmicli cannot set them; diting-nas-pref can.
+# diting-modem-redial runs it with "ensure-session" after a SIM swap: the
+# modem drops the session when the card leaves its slot and activates nothing
+# for the card in the other slot.
 q="qmicli -d qrtr://0"
+
+# The network mode of the desktop's mobile network settings, in the words
+# ModemManager uses: allowed="3g|4g|5g" preferred="5g"; and, in its own
+# words: usage="data" service_domain="ps-only"
+allowed="2g|3g|4g|5g"
+preferred=""
+nas_usage=""
+nas_service_domain=""
+if [ -r /etc/diting/modem-mode ]; then
+	# shellcheck source=/dev/null
+	. /etc/diting/modem-mode
+	# anything it does not say in these words is ignored as a whole
+	for m in $(echo "$allowed" | tr '|' ' '); do
+		case "$m" in
+		2g|3g|4g|5g) ;;
+		*) allowed="2g|3g|4g|5g"; break ;;
+		esac
+	done
+	case "|$allowed|" in
+	*"|$preferred|"*) ;;
+	*) preferred="" ;;
+	esac
+	nas_usage="${usage:-}"
+	case "$nas_usage" in
+	voice|data) ;;
+	*) nas_usage="" ;;
+	esac
+	nas_service_domain="${service_domain:-}"
+	case "$nas_service_domain" in
+	cs-only|ps-only|cs-ps|ps-attach|ps-detach) ;;
+	*) nas_service_domain="" ;;
+	esac
+fi
+
+# One attempt: 0 when a primary GW session exists, or after activating the
+# USIM application of the first slot with a card for it.
+try_session() {
+	status="$($q --uim-get-card-status 2>/dev/null)"
+	echo "$status" | grep -q "Primary GW:   slot" && return 0
+	slot=$(echo "$status" | awk '/^Slot \[/ { s = substr($2, 2, 1) } /Card state: .present./ { print s; exit }')
+	aid=$(echo "$status" | sed -n "/^Slot \[$slot\]/,/^Slot \[/p" |
+		awk '/Application type:  .usim/ { u = 1 } u && /Application ID:/ { getline; gsub(/[ \t]/, ""); print; exit }')
+	[ -n "$slot" ] && [ -n "$aid" ] || return 1
+	$q --uim-change-provisioning-session="slot=$slot,activate=yes,session-type=primary-gw-provisioning,aid=$aid"
+}
+
+if [ "$1" = ensure-session ]; then
+	# 0 only after activating a session here; one that exists already is no
+	# reason to restart ModemManager. The card needs a moment after it is
+	# inserted, so look a few times.
+	i=0
+	while [ "$i" -lt 3 ]; do
+		$q --uim-get-card-status 2>/dev/null | grep -q "Primary GW:   slot" && exit 1
+		try_session && exit 0
+		i=$((i + 1))
+		sleep 1
+	done
+	exit 1
+fi
+
+if [ "$1" = apply-mode ]; then
+	[ -r /etc/diting/modem-mode ] || exit 0
+	# ModemManager exposes the modem only once it has initialized it (~30 s)
+	i=0
+	while :; do
+		state=$(mmcli -m any 2>/dev/null | grep -m1 "state:")
+		case "$state" in
+		*enabled*|*search*|*regist*|*connect*) break ;;
+		*failed*|*locked*) exit 0 ;;	# nothing to set on until the SIM works
+		esac
+		i=$((i + 1))
+		[ "$i" -ge 60 ] && { echo "diting-modem-setup: no modem to set the network mode on" >&2; exit 0; }
+		sleep 2
+	done
+	if [ -n "$preferred" ]; then
+		mmcli -m any --set-allowed-modes="$allowed" --set-preferred-mode="$preferred" >/dev/null 2>&1 ||
+			echo "diting-modem-setup: couldn't set the network mode" >&2
+	else
+		mmcli -m any --set-allowed-modes="$allowed" >/dev/null 2>&1 ||
+			echo "diting-modem-setup: couldn't set the network mode" >&2
+	fi
+	exit 0
+fi
 
 # wait for the modem's UIM service (QMI service 11) to appear on QRTR
 i=0
@@ -18,20 +111,18 @@ done
 # the card shows up a few seconds after the UIM service; then activate the
 # first USIM application of the first slot with a card present
 i=0
-while :; do
-	status="$($q --uim-get-card-status 2>/dev/null)"
-	echo "$status" | grep -q "Primary GW:   slot" && break
-	slot=$(echo "$status" | awk '/^Slot \[/ { s = substr($2, 2, 1) } /Card state: .present./ { print s; exit }')
-	aid=$(echo "$status" | sed -n "/^Slot \[$slot\]/,/^Slot \[/p" |
-		awk '/Application type:  .usim/ { u = 1 } u && /Application ID:/ { getline; gsub(/[ \t]/, ""); print; exit }')
-	if [ -n "$slot" ] && [ -n "$aid" ]; then
-		$q --uim-change-provisioning-session="slot=$slot,activate=yes,session-type=primary-gw-provisioning,aid=$aid" &&
-			break
-	fi
+while ! try_session; do
 	i=$((i + 1))
 	[ "$i" -ge 60 ] && { echo "diting-modem-setup: no SIM application to activate" >&2; break; }
 	sleep 1
 done
 
-$q --nas-set-system-selection-preference="gsm|umts|lte|5gnr" >/dev/null 2>&1 || true
+$q --nas-set-system-selection-preference="$(echo "$allowed" | sed 's/2g/gsm/g; s/3g/umts/g; s/4g/lte/g; s/5g/5gnr/g')" >/dev/null 2>&1 || true
+
+# the fields of the same preference that qmicli cannot send
+set --
+[ -n "$nas_usage" ] && set -- "$@" "usage=$nas_usage"
+[ -n "$nas_service_domain" ] && set -- "$@" "service-domain=$nas_service_domain"
+[ $# -eq 0 ] || /usr/lib/diting/diting-nas-pref "$@" >/dev/null 2>&1 ||
+	echo "diting-modem-setup: couldn't set the usage and the service domain" >&2
 exit 0

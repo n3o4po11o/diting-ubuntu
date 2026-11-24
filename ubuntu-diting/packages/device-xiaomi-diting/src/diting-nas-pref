@@ -1,0 +1,230 @@
+#!/usr/bin/python3
+"""Show or set the fields of the modem's NAS system selection preference
+that qmicli does not expose.
+
+    diting-nas-pref                           show them
+    diting-nas-pref usage=data service-domain=ps-only
+        usage           voice | data
+        voice-domain    cs-only | ps-only | cs-preferred | ps-preferred
+        service-domain  cs-only | ps-only | cs-ps | ps-attach | ps-detach
+
+The modem applies a change asynchronously and invalidates the QMI client
+that asked for it, so after setting this reads the preference with new
+clients until it matches, and fails if it never does.
+Needs gir1.2-qmi-1.0 and gir1.2-qrtr-1.0.
+"""
+import sys
+
+import gi
+
+gi.require_version("GLib", "2.0")
+gi.require_version("Qmi", "1.0")
+gi.require_version("Qrtr", "1.0")
+from gi.repository import GLib, Qmi, Qrtr  # noqa: E402  (after the versions)
+
+USAGE = {"voice": Qmi.NasUsagePreference.VOICE_CENTRIC,
+         "data": Qmi.NasUsagePreference.DATA_CENTRIC}
+VOICE_DOMAIN = {"cs-only": Qmi.NasVoiceDomainPreference.CS_ONLY,
+                "ps-only": Qmi.NasVoiceDomainPreference.PS_ONLY,
+                "cs-preferred": Qmi.NasVoiceDomainPreference.CS_PREFERRED,
+                "ps-preferred": Qmi.NasVoiceDomainPreference.PS_PREFERRED}
+SERVICE_DOMAIN = {"cs-only": Qmi.NasServiceDomainPreference.CS_ONLY,
+                  "ps-only": Qmi.NasServiceDomainPreference.PS_ONLY,
+                  "cs-ps": Qmi.NasServiceDomainPreference.CS_PS,
+                  "ps-attach": Qmi.NasServiceDomainPreference.PS_ATTACH,
+                  "ps-detach": Qmi.NasServiceDomainPreference.PS_DETACH}
+# printed name, accepted words, setter on the request, getter on the reply
+FIELDS = (("usage", USAGE, "set_usage_preference", "get_usage_preference"),
+          ("voice-domain", VOICE_DOMAIN, "set_voice_domain_preference", "get_voice_domain_preference"),
+          ("service-domain", SERVICE_DOMAIN, "set_service_domain_preference", "get_service_domain_preference"))
+READS_AFTER_SETTING = 12
+
+loop = GLib.MainLoop()
+bus = None         # the QRTR bus lookup must outlive the device
+device = None
+wanted = []        # (name, value, setter)
+reads = 0
+result = False
+
+
+def done(ok):
+    global result
+    result = ok
+    loop.quit()
+
+
+def release(client, ok):
+    """give the client back, then finish; one the modem invalidated cannot be"""
+
+    def released(source, res, user_data=None):
+        try:
+            device.release_client_finish(res)
+        except GLib.Error:
+            pass
+        done(ok)
+
+    device.release_client(client, Qmi.DeviceReleaseClientFlags.RELEASE_CID, 10, None, released, None)
+
+
+def fail(message):
+    print("error: %s" % message, file=sys.stderr)
+    done(False)
+
+
+def current(client, res):
+    """the preference as the modem reports it, or None after an error"""
+    try:
+        output = client.get_system_selection_preference_finish(res)
+        return {name: getattr(output, getter)() for name, words, setter, getter in FIELDS}
+    except GLib.Error as error:
+        fail("couldn't read the system selection preference: %s" % error.message)
+        return None
+
+
+def show(state):
+    for name, words, setter, getter in FIELDS:
+        value = state[name]
+        print("%s: %s" % (name, value.value_nick if value is not None else "unknown"))
+
+
+def with_client(use):
+    """run use() with a NAS client of its own"""
+
+    def allocated(source, res, user_data=None):
+        try:
+            use(device.allocate_client_finish(res))
+        except GLib.Error as error:
+            fail("couldn't create the NAS client: %s" % error.message)
+
+    device.allocate_client(Qmi.Service.NAS, Qmi.CID_NONE, 10, None, allocated, None)
+
+
+def read_with(client, then):
+    client.get_system_selection_preference(None, 10, None,
+                                           lambda source, res, user_data=None: then(current(client, res)), None)
+
+
+def send(client):
+    """the request carries every setting asked for; the modem's answer comes later"""
+
+    def sent(source, res, user_data=None):
+        try:
+            client.set_system_selection_preference_finish(res).get_result()
+        except GLib.Error as error:
+            fail("couldn't set the system selection preference: %s" % error.message)
+            return
+        GLib.timeout_add(500, with_client, check)
+
+    message = Qmi.MessageNasSetSystemSelectionPreferenceInput()
+    try:
+        for name, value, setter in wanted:
+            getattr(message, setter)(value)
+    except GLib.Error as error:
+        fail("couldn't build the request: %s" % error.message)
+        return
+    client.set_system_selection_preference(message, 10, None, sent, None)
+
+
+def check(client):
+    """the modem applies the change asynchronously and invalidates the client that asked"""
+    global reads
+
+    def judged(state):
+        global reads
+        if state is None:
+            loop.quit()
+            return
+        if all(state[name] == value for name, value, setter in wanted):
+            show(state)
+            release(client, True)
+            return
+        reads += 1
+        if reads >= READS_AFTER_SETTING:
+            print("error: the modem did not take the request; it reports:", file=sys.stderr)
+            show(state)
+            release(client, False)
+            return
+        GLib.timeout_add(500, with_client, check)
+
+    read_with(client, judged)
+
+
+def first(client):
+    if wanted:
+        send(client)
+        return
+
+    def shown(state):
+        if state is None:
+            loop.quit()
+            return
+        show(state)
+        release(client, True)
+
+    read_with(client, shown)
+
+
+def opened(source, res, user_data=None):
+    try:
+        device.open_finish(res)
+    except GLib.Error as error:
+        fail("couldn't open the device: %s" % error.message)
+        return
+    with_client(first)
+
+
+def created(source, res, user_data=None):
+    global device
+    try:
+        device = Qmi.Device.new_finish(res)
+    except GLib.Error as error:
+        fail("couldn't create the device: %s" % error.message)
+        return
+    device.open(Qmi.DeviceOpenFlags.VERSION_INFO | Qmi.DeviceOpenFlags.EXPECT_INDICATIONS, 15, None, opened, None)
+
+
+def bus_ready(source, res, user_data=None):
+    global bus
+    try:
+        bus = Qrtr.Bus.new_finish(res)
+    except GLib.Error as error:
+        fail("couldn't access the QRTR bus: %s" % error.message)
+        return
+    # qrtr://0: the first node that runs the NAS service
+    for candidate in bus.peek_nodes() or []:
+        if any(info.get_service() == Qmi.Service.NAS for info in candidate.peek_service_info_list() or []):
+            Qmi.Device.new_from_node(candidate, None, created, None)
+            return
+    fail("no node with the NAS service in the QRTR bus")
+
+
+def timed_out():
+    fail("the modem did not answer")
+    return GLib.SOURCE_REMOVE
+
+
+def main(arguments):
+    for argument in arguments:
+        name, separator, value = argument.partition("=")
+        for field, words, setter, getter in FIELDS:
+            if name == field:
+                if value not in words:
+                    print("error: unknown %s '%s'" % (name, value), file=sys.stderr)
+                    return 1
+                wanted.append((name, words[value], setter))
+                break
+        else:
+            print("error: unknown argument '%s'" % argument, file=sys.stderr)
+            return 1
+
+    if not Qrtr.get_node_for_uri("qrtr://0/", 0):
+        print("error: no QRTR node 0", file=sys.stderr)
+        return 1
+    GLib.timeout_add_seconds(30, timed_out)
+    Qrtr.Bus.new(1000, None, bus_ready, None)
+    loop.run()
+    return 0 if result else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

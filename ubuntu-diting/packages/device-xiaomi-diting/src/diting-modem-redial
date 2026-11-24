@@ -13,26 +13,30 @@ dead=0
 deaths=0
 missing=0
 backoff=0
+restarted=0
+mm_started=
 gsm_con() {
 	nmcli -t -f TYPE,NAME connection show 2>/dev/null |
 		awk -F: '$1 == "gsm" { print $2; exit }'
+}
+restart_modem_fw() {	# the SIM session and the network mode survive it: rmtfs keeps the EFS
+	modem_rproc=""
+	for r in /sys/class/remoteproc/remoteproc*/name; do
+		grep -q modem "$r" 2>/dev/null && modem_rproc="${r%/name}"
+	done
+	[ -n "$modem_rproc" ] && [ -w "$modem_rproc/state" ] || return
+	echo stop > "$modem_rproc/state" 2>/dev/null
+	sleep 5
+	echo start > "$modem_rproc/state" 2>/dev/null
+	sleep 10
 }
 recover() {	# recover <level>: 1 redial, 2 ModemManager restart, 3 modem restart
 	con="$(gsm_con)"
 	[ -n "$con" ] || return
 	level="${1:-2}"
 	case "$level" in
-	3)	modem_rproc=""
-		for r in /sys/class/remoteproc/remoteproc*/name; do
-			grep -q modem "$r" 2>/dev/null && modem_rproc="${r%/name}"
-		done
-		if [ -n "$modem_rproc" ] && [ -w "$modem_rproc/state" ]; then
-			logger -t diting-modem-redial "recovering: restarting the modem firmware"
-			echo stop > "$modem_rproc/state" 2>/dev/null
-			sleep 5
-			echo start > "$modem_rproc/state" 2>/dev/null
-			sleep 10
-		fi
+	3)	logger -t diting-modem-redial "recovering: restarting the modem firmware"
+		restart_modem_fw
 		systemctl restart ModemManager
 		;;
 	2)	logger -t diting-modem-redial "recovering: restarting ModemManager"
@@ -49,13 +53,42 @@ recover() {	# recover <level>: 1 redial, 2 ModemManager restart, 3 modem restart
 }
 while :; do
 	sleep 60
-	if [ "$backoff" -gt 0 ]; then
+	# A SIM moved to the other slot while the system runs (or one inserted
+	# after boot): the modem drops the provisioning session and activates
+	# nothing for the card in its new slot, and ModemManager fails with
+	# sim-missing although the card is there. Activate the card as at boot.
+	# The modem is restarted as well: it keeps the state of the card that
+	# left, and the first dial of the new card was refused until it was.
+	# diting-modem-setup alone decides, so that this also runs while
+	# ModemManager has not exposed the modem yet (70 s without a usable SIM).
+	if /usr/lib/diting/diting-modem-setup ensure-session >/dev/null 2>&1; then
+		logger -t diting-modem-redial "SIM swapped: session activated, restarting the modem and ModemManager"
+		restart_modem_fw
+		systemctl restart ModemManager
+		# it exposes the modem again only once it is initialized
+		missing=0
+		continue
+	fi
+	# ModemManager was started again: its stop hook disconnected the cellular
+	# connection through it, which also makes NetworkManager stop
+	# auto-activating it. The dial after a restart is this script's job then,
+	# at once and whatever the back-off below: a dial after that clean
+	# disconnect is not refused.
+	started=$(systemctl show ModemManager -p ActiveEnterTimestampMonotonic --value 2>/dev/null)
+	case "$started" in ''|*[!0-9]*) started=0 ;; esac
+	if [ "$started" != "$mm_started" ]; then
+		mm_started=$started
+		restarted=4
+	fi
+	[ "$restarted" -eq 0 ] || restarted=$((restarted - 1))
+	if [ "$restarted" -eq 0 ] && [ "$backoff" -gt 0 ]; then
 		backoff=$((backoff - 1))
 		continue
 	fi
 	# A network that throttles PDN establishment ("pdn-*-call-throttled")
 	# prolongs the throttle for every retry: back off for 15 minutes
-	if journalctl -u ModemManager --since "-10 min" --no-pager 2>/dev/null |
+	if [ "$restarted" -eq 0 ] &&
+		journalctl -u ModemManager --since "-10 min" --no-pager 2>/dev/null |
 		grep -q throttled; then
 		backoff=15
 		logger -t diting-modem-redial "connection throttled by the network; backing off"
@@ -69,7 +102,7 @@ while :; do
 		;;
 	*disconnected*)
 		down=$((down + 1)); stuck=0; dead=0
-		if [ "$down" -ge 2 ]; then
+		if [ "$down" -ge 2 ] || [ "$restarted" -gt 0 ]; then
 			down=0
 			con="$(gsm_con)"
 			[ -n "$con" ] && nmcli connection up "$con" >/dev/null 2>&1
@@ -92,12 +125,21 @@ while :; do
 		;;
 	"")
 		# modem gone: ModemManager's re-scan after a resume may not find
-		# the QRTR modem again; a restart brings it back
-		missing=$((missing + 1))
-		if [ "$missing" -ge 2 ]; then
+		# the QRTR modem again; a restart brings it back. It exposes the
+		# modem only once it has initialized it, 30 s, 70 s without a
+		# usable SIM; a ModemManager younger than that is not missing.
+		mm_up=$(systemctl show ModemManager -p ActiveEnterTimestampMonotonic --value 2>/dev/null)
+		case "$mm_up" in ''|*[!0-9]*) mm_up=0 ;; esac
+		age=$(( $(cut -d. -f1 /proc/uptime) - mm_up / 1000000 ))
+		if [ "$age" -lt 90 ]; then
 			missing=0
-			logger -t diting-modem-redial "modem gone; restarting ModemManager"
-			systemctl restart ModemManager
+		else
+			missing=$((missing + 1))
+			if [ "$missing" -ge 2 ]; then
+				missing=0
+				logger -t diting-modem-redial "modem gone; restarting ModemManager"
+				systemctl restart ModemManager
+			fi
 		fi
 		;;
 	*)

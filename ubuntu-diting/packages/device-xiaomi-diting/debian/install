@@ -24,7 +24,10 @@ src/diting-bt-address usr/lib/diting
 ucm/conf.d/sm8450/XIAOMI-DITING.conf usr/share/alsa/ucm2/conf.d/sm8450
 ucm/Qualcomm/sm8450/XIAOMI-DITING/HiFi.conf usr/share/alsa/ucm2/Qualcomm/sm8450/XIAOMI-DITING
 src/diting-modem-setup usr/lib/diting
+# the NAS usage and service domain: fields qmicli cannot send (python3-gi + gir1.2-qmi)
+src/diting-nas-pref usr/lib/diting
 systemd/diting-modem-setup.service usr/lib/systemd/system
+systemd/diting-modem-mode.service usr/lib/systemd/system
 systemd/10-diting-journald.conf usr/lib/systemd/journald.conf.d
 src/diting-voice-pcm usr/libexec/diting
 src/diting-voice-call usr/libexec/diting
@@ -55,6 +58,9 @@ system-sleep/diting-resuspend usr/lib/systemd/system-sleep
 fastrpc/xiaomi-diting.yaml usr/share/qcom/conf.d
 mask/etc/systemd/system/rmtfs-dir.service etc/systemd/system
 src/diting-modem-redial usr/lib/diting
+# stop hook: disconnect the cellular connection before ModemManager ends
+src/diting-mm-stop usr/lib/diting
+systemd/50-diting-clean-disconnect.conf usr/lib/systemd/system/ModemManager.service.d
 systemd/diting-modem-redial.service usr/lib/systemd/system
 src/diting-bt-fixup usr/lib/diting
 systemd/diting-bt-fixup.service usr/lib/systemd/system

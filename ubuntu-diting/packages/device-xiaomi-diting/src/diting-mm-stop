@@ -1,0 +1,14 @@
+#!/bin/sh
+# Stop ModemManager without leaving an aborted data call in the modem.
+# ExecStop of ModemManager.service. A bearer that ends with the ModemManager
+# process makes the modem treat the call as aborted: it refuses the next
+# dial for the APN (CallFailed after six seconds) and throttles PDN calls for
+# about five minutes. A bearer that ModemManager disconnects itself does
+# not: the next dial goes through right away. So disconnect through the
+# running ModemManager first, then stop it the way systemd would have.
+con="$(nmcli -t -f TYPE,NAME connection show --active 2>/dev/null |
+	awk -F: '$1 == "gsm" { print $2; exit }')"
+if [ -n "$con" ]; then
+	nmcli --wait 10 connection down "$con" >/dev/null || true
+fi
+kill -TERM "${MAINPID:-}" 2>/dev/null

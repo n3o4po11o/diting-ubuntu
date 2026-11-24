@@ -1,0 +1,15 @@
+[Unit]
+Description=Set the network mode from /etc/diting/modem-mode
+# diting-modem-setup has allowed the technologies before ModemManager
+# started; only ModemManager can also set the preferred one, which is the
+# modem's acquisition order.
+After=ModemManager.service
+ConditionPathExists=/etc/diting/modem-mode
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/diting/diting-modem-setup apply-mode
+TimeoutStartSec=150
+
+[Install]
+WantedBy=multi-user.target
