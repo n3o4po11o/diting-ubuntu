@@ -292,6 +292,19 @@ check test "$(shellcheck --version | sed -n 's/^version: //p')" = 0.10.0
 echo "     error-level shellcheck findings in the whole tree (lint.sh covers a part of it):"
 sed 's/^/       /' "$W/outside.txt"
 
+echo "== 9. the workflow names scripts that exist in the checkout"
+# The scripts a run step names are relative to the root of the checkout, not
+# to ubuntu-diting/. The first run of the workflow stopped in no time on
+# ci/run-on-github.sh, which is ubuntu-diting/ci/run-on-github.sh.
+bad_paths="$(grep -oE '[A-Za-z0-9_./$-]+\.sh\b' "$SRC/.github/workflows/build.yml" | sort -u |
+	grep -v '\$' | while read -r p; do
+		if [ ! -e "$SRC/$p" ]; then echo "$p (missing)"
+		elif [ ! -x "$SRC/$p" ]; then echo "$p (not executable)"; fi
+	done)"
+checkdesc="every script path in build.yml exists and is executable (bad: ${bad_paths:-none})"
+check test -z "$bad_paths"
+echo "     script paths in build.yml: $(grep -oE '[A-Za-z0-9_./$-]+\.sh\b' "$SRC/.github/workflows/build.yml" | sort -u | tr '\n' ' ')"
+
 echo
 echo "passed: $pass, failed: $fail"
 [ "$fail" = 0 ]

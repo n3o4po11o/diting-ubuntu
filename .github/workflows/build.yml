@@ -85,7 +85,9 @@ jobs:
       - name: Build from zero and pack the artifacts
         env:
           TMP: ${{ runner.temp }}
-        run: ci/run-on-github.sh "$TMP/logs" "$TMP/stage" "$TMP/artifacts"
+        run: >-
+          ubuntu-diting/ci/run-on-github.sh
+          "$TMP/logs" "$TMP/stage" "$TMP/artifacts"
       - name: Result of the stages
         if: always()
         env:
