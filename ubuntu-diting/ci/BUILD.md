@@ -17,11 +17,12 @@ the end.
 | File | Purpose |
 | --- | --- |
 | `Dockerfile` | The builder image: Debian 13 with the host packages of `docs/BUILD.md` and what the scripts need in a container. The base image is pinned by digest. |
-| `build-fromzero.sh` | Runs the build stage by stage, times each stage, stops at the first failure, resumes after it. |
+| `build-fromzero.sh` | Runs the build stage by stage: times each stage, prints what it prints as it runs and a progress line every minute, stops at the first failure, resumes after it. |
 | `pack-artifacts.sh` | Collects a finished build into one directory: the flashable parts, the rootfs image, the release archive, the builder image, checksums. |
 | `lint.sh` | What the lint job of the workflow runs: shellcheck over the shell scripts; an error fails. |
 | `tests.sh` | Tests of the scripts in this directory against stand-ins for make and docker; seconds inside the image. |
-| `run-on-github.sh` | The build job of the workflow: the stages in five parts, with what a finished part no longer needs deleted in between, then steps 3 and 4. |
+| `run-stage.sh` | For the workflow: one call of the driver in the container, so that a step of the workflow is a stage. |
+| `run-pack.sh` | For the workflow, after its last stage: saves the builder image and packs the artifacts (steps 3 and 4). |
 
 ## What it needs
 
@@ -34,8 +35,7 @@ the end.
   (reference trees), ports.ubuntu.com, packages.mozilla.org and the snap
   store. `--network=host` gives the container the host's resolver.
 - **Disk.** About 65 GB for one run (source clones 6.5 GB, `work/` 41 GB,
-  `output/` 15 GB) plus 3.8 GB for the packed artifacts. Run in parts with
-  deletion in between, as the workflow does, the peak is about 21 GB.
+  `output/` 15 GB) plus 3.8 GB for the packed artifacts.
 - **Time.** Hours; see the stage table. Start the run detached.
 - **No phone data.** `device-data/` is not needed. Without it the header
   comparison against the stock boot images is skipped (`build-release.sh`
@@ -60,7 +60,7 @@ in it with its version.
 
 ```sh
 mkdir -p /tmp/diting-logs
-docker run -d --name diting-fromzero --privileged --network=host \
+docker run -d --name diting-fromzero --init --privileged --network=host \
     -v "$PWD:/src" -v /tmp/diting-logs:/logs -w /src/ubuntu-diting \
     -e JOBS=6 -e FROMZERO_LOGDIR=/logs \
     diting-builder:$REV ci/build-fromzero.sh
@@ -69,13 +69,23 @@ docker run -d --name diting-fromzero --privileged --network=host \
 The script refuses to start when `ubuntu-diting/work` or `ubuntu-diting/output`
 exists: from zero means a fresh checkout. The container runs as root, so
 `work/`, `output/` and the cloned trees end up owned by root on the host.
-Each stage writes `/tmp/diting-logs/<stage>.log`; `status.tsv` gets one line
-per stage with its exit status and seconds, and `DONE` appears when all of
-them passed. Watch it with `tail -f /tmp/diting-logs/driver.log`; the
-container exits when the run ends, with the build's exit status.
+Watch it with `docker logs -f diting-fromzero`. What comes out:
 
-If a stage fails, fix the cause and start the same container again with
-`ci/build-fromzero.sh --resume` instead: stages that passed are skipped.
+- What the stage prints, as it runs (also kept in `/tmp/diting-logs/<stage>.log`).
+- Once a minute: how long the stage has been running, the free disk, and for
+  every log under `output/logs` that is being written to (that is where the
+  build scripts keep the compiler's and the package builds' output) its
+  number of lines and its last line.
+- When a stage fails: the last 40 lines of each of those logs.
+
+`status.tsv` gets one line per stage with its exit status and seconds,
+`driver.log` the short version of the output, and `DONE` appears when all
+stages have passed. The container exits when the run ends, with the build's
+exit status; `docker stop` stops the processes of the running stage too.
+
+If a stage fails, fix the cause, remove the container (`docker rm
+diting-fromzero`) and run the same command with `ci/build-fromzero.sh
+--resume` at the end: stages that passed are skipped.
 
 `JOBS` is the parallelism of the kernel build. The reference run used 6 on a
 host with 8 cores and 10 GB RAM that was in use at the same time.
@@ -138,7 +148,7 @@ The last column is the reference run.
 | --- | --- | --- | --- |
 | `check-host` | `make check-host` | Host tools present. | < 1 s |
 | `sources` | `make sources` | The signed kernel tag, its signature verified, and the reference trees at their pinned commits. | 10 min |
-| `kernel` | `make kernel` | Export, the 104 patches, Image, DTBs, modules, the `linux-image` package. | 49 min |
+| `kernel` | `make kernel` | Export, the kernel patches, Image, DTBs, modules, the `linux-image` package. | 49 min |
 | `packages` | `make packages` | `device-xiaomi-diting`, fastrpc, hexagonrpcd. | 41 s |
 | `rootfs` | `make rootfs` | Its prerequisites first (VA-API driver, firmware-setup, mobile-config-firefox, ModemManager, phosh, each in an arm64 build chroot), then the owner rootfs and its image. | 40 min |
 | `sensors` | `make sensors` | libssc and iio-sensor-proxy with SSC support. | 3 min |
@@ -221,38 +231,40 @@ build tools all came from the image.
 
 `.github/workflows/build.yml` has two jobs.
 
-- **lint**, on every push and pull request, on a hosted x86-64 runner, in a
-  few minutes: builds the image, runs `ci/lint.sh` (shellcheck, an error
-  fails) and `ci/tests.sh` (the tests of the scripts in this directory).
+- **lint**, on every push and pull request, on a hosted x86-64 runner, in
+  under two minutes: builds the image, runs `ci/lint.sh` (shellcheck, an
+  error fails) and `ci/tests.sh` (the tests of the scripts in this
+  directory).
 - **build**, after lint: on pushes to main, on tags `v*`, weekly (Mondays
-  03:23 UTC) and by hand. The whole build from zero and the packing, through
-  `ci/run-on-github.sh`, on a hosted arm64 runner (`ubuntu-24.04-arm`, free
-  for public repositories): the native build of this page. Two workflow
-  artifacts come out, `diting-<rev>` (the directory of the Artifacts
-  section) and `diting-<rev>-logs`, kept for 14 days.
+  03:23 UTC) and by hand, on a hosted arm64 runner (`ubuntu-24.04-arm`,
+  free for public repositories), which is the native build of this page:
+  the ten stages of the table above, one step per stage (the first two
+  together), through `ci/run-stage.sh`; then `ci/run-pack.sh` saves the
+  image and packs the artifacts. Two workflow artifacts come out,
+  `diting-<rev>` (the directory of the Artifacts section) and
+  `diting-<rev>-logs`, kept for 14 days.
 
-The build of a new push to main replaces the one of the commit before it,
-and commits that only change documentation or the experimental patches start
-nothing. To build on a self-hosted runner instead, set the repository
-variable `BUILD_RUNNER` to its label.
+The log of a step is what the driver prints for its stage, live: the output
+of the stage, the progress line every minute, and when it fails the end of
+the build logs it wrote and an error annotation in the summary of the run.
+The `...-logs` artifact has the logs of the stages and those of the build
+scripts (`output/logs`), whether the build passed or not.
 
-Two things are different on a hosted runner:
+The build of a new push to main replaces the build of the commit before it:
+the second run was cancelled that way, ten minutes into its rootfs stage,
+when the next commit was pushed. Commits that only change documentation or
+the experimental patches start nothing. To build on a self-hosted runner
+instead, set the repository variable `BUILD_RUNNER` to its label.
 
-- **Disk.** The runner's documented space is 14 GB; one unbroken run needs
-  about 65 GB. `ci/run-on-github.sh` therefore runs the stages in five parts
-  and deletes between them what the later stages do not need: the kernel
-  tree and the owner image after the owner rootfs, each rootfs copy after
-  its package, the owner tree and the reference trees after phoc, and after
-  the packing everything else. That brings the peak to about 21 GB. The
-  workflow also removes the preinstalled SDKs of the runner image, as
-  insurance.
-- **Time.** Four cores, where the reference run had eight and took 2 h 32
-  min. A hosted runner stops a job after 6 hours; the job's timeout is set
-  to 350 minutes.
+Measured on a hosted runner, which has four cores: 115 GB free once the
+workflow has removed the preinstalled SDKs (one unbroken run needs about 65
+GB), `sources` 4 minutes, `kernel` 28 minutes, `packages` 21 seconds. A
+hosted runner stops a job after 6 hours; the job's timeout is 350 minutes.
 
-The workflow has not run on GitHub at the time of writing. Its lint job is
-the first test of the Dockerfile's branch for other architectures, and the
-disk and time figures of the build job are estimates.
+Not verified on GitHub at the time of writing: the stages from `rootfs` on
+and the packing have not completed there (the first run to reach them was
+the one that got cancelled), and a cancellation stopping the processes of
+the running stage is tested with stand-ins only.
 
 ## What building from zero showed
 
@@ -297,7 +309,8 @@ itself:
 Not verified:
 
 - The Dockerfile's branch for other architectures (cross toolchain and
-  qemu-user) has not been run; only the native arm64 path has.
+  qemu-user) builds: the lint job does it on x86-64. No build has run in
+  that image; only the native arm64 path has.
 - The build repeats in configuration, not bit for bit: the Ubuntu archive,
   the `libcamera` and `phoc` sources (`apt-get source` without a version) and
   the snap store move.

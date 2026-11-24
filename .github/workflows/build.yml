@@ -6,7 +6,7 @@
 #           finds no error in the shell scripts, and the tests of the ci
 #           scripts pass
 #   build   pushes to main, tags, weekly and by hand: the whole build from
-#           zero, packaged as workflow artifacts
+#           zero, one step per stage, packaged as workflow artifacts
 name: build
 
 "on":
@@ -69,9 +69,10 @@ jobs:
         run: echo "REV=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
       - name: Free disk space
         run: |
-          # Insurance for the about 21 GB the build needs at its peak: the
-          # preinstalled SDKs are not used here. /opt/hostedtoolcache stays,
-          # JavaScript actions run on its Node.
+          # The build needs about 65 GB at its peak. The preinstalled SDKs of
+          # the runner image are not used here; with them gone, the runner had
+          # 115 GB free. /opt/hostedtoolcache stays: JavaScript actions run on
+          # its Node.
           for d in /usr/local/lib/android /usr/share/dotnet /opt/ghc \
               /opt/hostedtoolcache/CodeQL /usr/local/.ghcup; do
             sudo rm -rf "$d"
@@ -82,17 +83,36 @@ jobs:
         run: >-
           docker build -t "diting-builder:$REV"
           --build-arg VCS_REF="$GITHUB_SHA" ubuntu-diting/ci
-      - name: Build from zero and pack the artifacts
+      # One step per stage. The log of a step is the output of its stage as it
+      # runs, with a progress line every minute; when a stage fails, the end
+      # of every build log it wrote follows there.
+      - name: "Stage 1 of 9: check-host, sources"
+        run: ubuntu-diting/ci/run-stage.sh check-host sources
+      - name: "Stage 2 of 9: kernel"
+        run: ubuntu-diting/ci/run-stage.sh --resume kernel
+      - name: "Stage 3 of 9: packages"
+        run: ubuntu-diting/ci/run-stage.sh --resume packages
+      - name: "Stage 4 of 9: rootfs (owner)"
+        run: ubuntu-diting/ci/run-stage.sh --resume rootfs
+      - name: "Stage 5 of 9: sensors"
+        run: ubuntu-diting/ci/run-stage.sh --resume sensors
+      - name: "Stage 6 of 9: libcamera"
+        run: ubuntu-diting/ci/run-stage.sh --resume libcamera
+      - name: "Stage 7 of 9: phoc"
+        run: ubuntu-diting/ci/run-stage.sh --resume phoc
+      - name: "Stage 8 of 9: release (public image)"
+        run: ubuntu-diting/ci/run-stage.sh --resume release
+      - name: "Stage 9 of 9: verify"
+        run: ubuntu-diting/ci/run-stage.sh --resume verify
+      - name: Save the builder image and pack the artifacts
         env:
           TMP: ${{ runner.temp }}
         run: >-
-          ubuntu-diting/ci/run-on-github.sh
-          "$TMP/logs" "$TMP/stage" "$TMP/artifacts"
+          ubuntu-diting/ci/run-pack.sh
+          "$TMP/stage" "$TMP/artifacts"
       - name: Result of the stages
         if: always()
-        env:
-          TMP: ${{ runner.temp }}
-        run: cat "$TMP/logs/summary.txt" || true
+        run: cat ubuntu-diting/output/fromzero/summary.txt || true
       - name: Upload the artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -101,11 +121,13 @@ jobs:
           compression-level: 0  # already compressed: xz and zstd
           retention-days: 14
           if-no-files-found: error
-      - name: Upload the logs
+      - name: Upload the logs of the stages and of the build scripts
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: diting-${{ env.REV }}-logs
-          path: ${{ runner.temp }}/logs
+          path: |
+            ubuntu-diting/output/fromzero
+            ubuntu-diting/output/logs
           retention-days: 14
           if-no-files-found: ignore
