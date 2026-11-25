@@ -9,8 +9,13 @@
 # The stages are the documented targets in order (README.md, docs/BUILD.md),
 # with sensors, libcamera and phoc between the owner rootfs and the release:
 # they build inside a copy of work/rootfs, and `make release` then picks
-# their packages up for the public image. `make release` has no Makefile
-# prerequisites, so this order is also the only one that works from zero.
+# their packages up for the public image. `make owner-release` builds the
+# owner rootfs again after them, from zero and with those packages too: the
+# image for the owner to flash. It has no SSH key (the runner has none):
+# release/add-ssh-key.sh puts one in on the machine the artifact is
+# downloaded to, a local step outside this workflow. `make release` and
+# `make owner-release` have no Makefile prerequisites, so this order is also
+# the only one that works from zero.
 #
 # What gets printed while the build runs:
 #   - the output of the stage as it comes (also kept in <logdir>/<stage>.log)
@@ -30,8 +35,9 @@
 # default 950MB: below the 1 GB limit of CI job artifacts), STAGES (run only
 # the named stages, space separated: to build a package for the phone, for
 # example. Every later call then needs --resume, because the tree is no
-# longer from zero. DONE appears once all ten stages have passed, also when
-# they ran in several calls; .github/workflows/build.yml relies on both),
+# longer from zero. DONE appears once all eleven stages have passed, also
+# when they ran in several calls; .github/workflows/build.yml relies on
+# both),
 # FROMZERO_HEARTBEAT (seconds between the progress lines, default 60).
 set -euo pipefail
 
@@ -63,6 +69,8 @@ all_stages=(
 	"libcamera:make libcamera"
 	"phoc:make phoc"
 	"release:make release"
+	# From zero: the tree of the rootfs stage was the base of three builds.
+	"owner-release:FORCE_ROOTFS=1 make owner-release"
 	"verify:make verify"
 )
 

@@ -10,6 +10,19 @@
 #                                                   RELEASE_PART_SIZE parts
 #   ubuntu-diting-*.tar.xz.NNN, .SHA256SUMS         the release archive, as
 #                                                   `make release` split it
+#   owner/                                          the owner image (make
+#                                                   owner-release): its boot
+#                                                   images and its sparse
+#                                                   rootfs image, xz-compressed
+#                                                   in parts like the public
+#                                                   one; flash-diting.sh; a
+#                                                   SHA256SUMS of its own (the
+#                                                   workflow makes it an
+#                                                   artifact of its own). No
+#                                                   SSH key in it: the key is
+#                                                   put in after the download,
+#                                                   on the machine the artifact
+#                                                   goes to (ci/BUILD.md)
 #   diting-builder-<rev>.tar.zst                    the builder image (BUILDER_
 #                                                   IMAGE_FILE), so the build
 #                                                   can be repeated with the
@@ -18,7 +31,8 @@
 #                                                   package list of the release
 #   BUILD-INFO, builder-packages.tsv, stages.txt    what was built, with what,
 #                                                   how long each stage took
-#   SHA256SUMS                                      of everything in DEST
+#   SHA256SUMS                                      of everything else in DEST
+#                                                   (owner/ is in its own)
 #
 # RELEASE_NAME defaults to the newest output/release/ubuntu-diting-*. Read-only
 # on output/; needs no docker and no root. Runs inside the builder image (or
@@ -53,6 +67,8 @@ if [ -z "$name" ]; then
 fi
 rel="$OUT/release/$name"
 [ -f "$rel/rootfs.img" ] || die "no release $rel (make release first)"
+own="$OUT/owner"
+[ -f "$own/rootfs.img" ] || die "no owner image $own/rootfs.img (make owner-release)"
 
 log "small flashable parts"
 # (not the -dbg package of the same build; same pattern as build-rootfs.sh)
@@ -71,6 +87,18 @@ done
 
 log "rootfs.img: xz, in $RELEASE_PART_SIZE parts"
 xz -T0 -6 -c "$rel/rootfs.img" | split -b "$RELEASE_PART_SIZE" -d -a 3 - "$dest/rootfs.img.xz."
+
+log "owner image: xz, in $RELEASE_PART_SIZE parts"
+mkdir -p "$dest/owner"
+for f in boot.img vendor_boot.img BUILD-INFO PACKAGES.tsv; do
+	if [ -f "$own/$f" ]; then cp "$own/$f" "$dest/owner/"; fi
+done
+cp "$UD/release/flash-diting.sh" "$dest/owner/"
+xz -T0 -6 -c "$own/rootfs.img" | split -b "$RELEASE_PART_SIZE" -d -a 3 - "$dest/owner/rootfs.img.xz."
+# A list of its own: the workflow uploads the owner image as an artifact of
+# its own, without DEST's.
+(cd "$dest/owner" && find . -type f ! -path ./SHA256SUMS -printf '%P\n' | sort |
+	xargs -d '\n' sha256sum > SHA256SUMS)
 
 log "release archive $name"
 for f in "$OUT/release/$name".tar.xz* "$OUT/release/$name.SHA256SUMS"; do
@@ -108,8 +136,9 @@ for f in MANIFEST.txt MANIFEST.sha256; do
 done
 
 log "checksums"
-# SHA256SUMS is excluded from its own list.
+# SHA256SUMS is excluded from its own list, and owner/ is not in it: that has
+# the list of its own above, which is all there is where the workflow sends it.
 # shellcheck disable=SC2094
-(cd "$dest" && find . -type f ! -path ./SHA256SUMS -printf '%P\n' | sort |
+(cd "$dest" && find . -type f ! -path ./SHA256SUMS ! -path './owner/*' -printf '%P\n' | sort |
 	xargs -d '\n' sha256sum > SHA256SUMS && sha256sum -c --quiet SHA256SUMS)
 log "artifacts in $dest ($(find "$dest" -type f | wc -l) files, $(du -sh --apparent-size "$dest" | cut -f1))"

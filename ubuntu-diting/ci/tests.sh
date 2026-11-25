@@ -39,6 +39,7 @@ U="$T/ubuntu-diting"
 build_log() { mkdir -p "$U/output/logs"; echo "$2" >>"$U/output/logs/$1"; }
 for t in "$@"; do
 	echo "$t" >>"$T/make.log"
+	[ -z "${FORCE_ROOTFS:-}" ] || echo "$t" >>"$T/make.forced"
 	echo "make: entering the $t stage"
 	case "$t" in
 	check-host) ;;
@@ -84,6 +85,13 @@ for t in "$@"; do
 		head -c 200K /dev/urandom >"$U/output/release/$n.tar.xz.000"
 		(cd "$U/output/release" && sha256sum "$n.tar.xz.000" >"$n.SHA256SUMS")
 		head -c 300K /dev/zero >"$U/output/ubuntu-diting-rootfs-resolute-arm64-public.img" ;;
+	owner-release)
+		o="$U/output/owner"
+		mkdir -p "$o" "$U/work/rootfs"
+		head -c 400K /dev/urandom >"$o/rootfs.img"
+		echo boot >"$o/boot.img"
+		echo vendor_boot >"$o/vendor_boot.img"
+		for f in BUILD-INFO PACKAGES.tsv; do echo "$f" >"$o/$f"; done ;;
 	verify)
 		echo "verify: 1 checks, all passed" >"$U/output/MANIFEST.txt"
 		: >"$U/output/MANIFEST.sha256"
@@ -105,22 +113,26 @@ cat > "$W/bin/docker" <<'DK'
 case "${1:-}" in
 save) echo "fake image archive of ${2:-}"; exit 0 ;;
 image) echo "sha256:fake"; exit 0 ;;
+info) exit 0 ;;
+build) cat >/dev/null; exit 0 ;;	# add-ssh-key.sh builds its small image; this container has the tools
 run) shift ;;
 *) echo "stand-in docker: unsupported: $*" >&2; exit 9 ;;
 esac
 declare -A env mounts
-wd=/ image=""
+wd=/ image="" opts=""
 while [ $# -gt 0 ]; do
 	case "$1" in
-	--rm | --init | --privileged | --network=host) shift ;;
-	-v) c="${2#*:}"; c="${c%:*}"; mounts["$c"]="${2%%:*}"; shift 2 ;;
+	--rm | --init | --privileged | --network=host | -i) opts="$opts $1"; shift ;;
+	--network | --user) opts="$opts $1 $2"; shift 2 ;;
+	-v) c="${2#*:}"; c="${c%:*}"; mounts["$c"]="${2%%:*}"; opts="$opts -v $2"; shift 2 ;;
 	-w) wd="$2"; shift 2 ;;
 	-e) env["${2%%=*}"]="${2#*=}"; shift 2 ;;
 	-*) echo "stand-in docker: unsupported option: $1" >&2; exit 9 ;;
 	*) image="$1"; shift; break ;;
 	esac
 done
-[ "$image" = "diting-builder:${REV:?}" ] || { echo "stand-in docker: unexpected image: $image" >&2; exit 9; }
+case "$image" in "diting-builder:${REV:-}" | diting-add-key) ;; *) echo "stand-in docker: unexpected image: $image" >&2; exit 9 ;; esac	# REV is not set when add-ssh-key.sh is run straight
+[ -z "$opts" ] || echo "docker options:$opts" >>"${TEST_TOP:?}/docker.log"
 echo "docker run: stages=${env[STAGES]:-} args=[$*]" >>"${TEST_TOP:?}/docker.log"
 map() {
 	local p
@@ -137,19 +149,21 @@ args=()
 for a in "$@"; do args+=("$(map "$a")"); done
 for k in "${!env[@]}"; do export "$k=$(map "${env[$k]}")"; done
 if [ "${args[0]}" = cat ]; then echo "stub-package 1.0"; exit 0; fi
+[ "${args[0]}" != bash ] || args=("${args[@]:1}")	# a command given to bash: -c …, or a script
 cd "$wd" && exec bash "${args[@]}"
 DK
 chmod +x "$W/bin/"*
 
 # ---------------------------------------------------------------- trees
-ALL="check-host sources kernel packages rootfs sensors libcamera phoc release verify"
+ALL="check-host sources kernel packages rootfs sensors libcamera phoc release owner-release verify"
 new_tree() { # a tree like the repository, with the scripts under test
 	local t="$W/t" u
 	rm -rf "$t"
 	u="$t/ubuntu-diting"
-	mkdir -p "$u/ci" "$u/scripts" "$u/config" "$t/kernel/config" "$t/tools/src"
+	mkdir -p "$u/ci" "$u/scripts" "$u/config" "$u/release" "$t/kernel/config" "$t/tools/src"
 	cp "$SRC"/ubuntu-diting/ci/{build-fromzero.sh,run-stage.sh,run-pack.sh,pack-artifacts.sh,Dockerfile} "$u/ci/"
 	cp "$SRC"/ubuntu-diting/scripts/lib.sh "$u/scripts/"
+	cp "$SRC"/ubuntu-diting/release/{flash-diting.sh,add-ssh-key.sh} "$u/release/"
 	cp "$SRC"/ubuntu-diting/config/{diting.conf,kernel.lock} "$u/config/"
 	cp "$SRC"/kernel/config/diting.config "$t/kernel/config/"
 	cp "$SRC/.gitignore" "$t/"
@@ -158,6 +172,7 @@ new_tree() { # a tree like the repository, with the scripts under test
 	git -C "$t" -c user.name=t -c user.email=t@t commit -qm "test tree"
 	export TEST_TOP="$t" U="$u"
 	: >"$t/make.log"
+	: >"$t/make.forced"
 	: >"$t/docker.log"
 }
 driver() { # driver [--env VAR=value]... -- [driver arguments]...
@@ -199,11 +214,14 @@ driver
 rc_is 0 "$?"
 present "$W/logs/DONE"
 made_all
-checkdesc="status.tsv has ten lines, all 0"; check test "$(grep -c -P "	0	" "$W/logs/status.tsv")" = 10
+checkdesc="status.tsv has eleven lines, all 0"; check test "$(grep -c -P "	0	" "$W/logs/status.tsv")" = 11
 expect "# all stages passed"
 expect "make: entering the rootfs stage"
 order "==> kernel: make kernel" "make: entering the kernel stage" "ok kernel" "==> packages: make packages"
 expect "kernel-build.log: 50 lines"
+order "==> release: make release" "ok release" "==> owner-release: FORCE_ROOTFS=1 make owner-release" "ok owner-release" "==> verify: make verify"
+checkdesc="only the owner image's rootfs is built from zero (FORCE_ROOTFS on: $(tr '\n' ' ' <"$TEST_TOP/make.forced"))"
+check test "$(cat "$TEST_TOP/make.forced")" = owner-release
 
 echo "== 2. the driver, only some stages (a package for the phone)"
 new_tree
@@ -211,7 +229,7 @@ driver --env "STAGES=sources packages verify"
 rc_is 0 "$?"
 made sources packages verify
 absent "$W/logs/DONE"
-expect "# these stages passed; not passed yet: check-host kernel rootfs sensors libcamera phoc release"
+expect "# these stages passed; not passed yet: check-host kernel rootfs sensors libcamera phoc release owner-release"
 
 echo "== 3. the driver, the build in parts, then resumed to the end"
 new_tree
@@ -223,8 +241,8 @@ for s in sensors libcamera phoc; do
 	rc_is 0 "$?"
 	absent "$W/logs/DONE"
 done
-expect "# these stages passed; not passed yet: release verify"
-driver --env "STAGES=release verify" -- --resume
+expect "# these stages passed; not passed yet: release owner-release verify"
+driver --env "STAGES=release owner-release verify" -- --resume
 rc_is 0 "$?"
 present "$W/logs/DONE"
 made_all
@@ -321,7 +339,7 @@ packer
 rc_not 0 "$?"
 expect "not every stage passed"
 checkdesc="nothing was packed"; check test -z "$(ls -A "$W/g/dest" 2>/dev/null || true)"
-for s in kernel packages rootfs sensors libcamera phoc release verify; do
+for s in kernel packages rootfs sensors libcamera phoc release owner-release verify; do
 	stage_step --resume "$s"
 	rc_is 0 "$?"
 done
@@ -339,6 +357,32 @@ checkdesc="BUILD-INFO names the builder image"
 check grep -q "^builder_image=diting-builder:test id=sha256:fake$" "$W/g/dest/BUILD-INFO"
 checkdesc="builder-packages.tsv is what the image listed"; check test "$(cat "$W/g/dest/builder-packages.tsv")" = "stub-package 1.0"
 noexpect "local_change="
+# shellcheck disable=SC2016  # $1 and $2 belong to the inner shell
+xz_of() { checkdesc="$3 is the xz of ${1#"$U/"}"; check bash -c 'xz -dc "$2" | cmp -s - "$1"' _ "$1" "$2" "$3"; }
+xz_of "$U/output/release/ubuntu-diting-20261124/rootfs.img" "$W/g/dest/rootfs.img.xz.000" "rootfs.img.xz.000"
+for f in boot.img vendor_boot.img BUILD-INFO PACKAGES.tsv flash-diting.sh; do
+	present "$W/g/dest/owner/$f"
+done
+# The key goes in on the machine the artifact is downloaded to: the workflow
+# does not ship release/add-ssh-key.sh (section 11: nor name it).
+absent "$W/g/dest/owner/add-ssh-key.sh"
+xz_of "$U/output/owner/rootfs.img" "$W/g/dest/owner/rootfs.img.xz.000" "owner/rootfs.img.xz.000"
+absent "$W/g/dest/owner/rootfs.img.xz.001"
+checkdesc="owner/ verifies against the SHA256SUMS of its own"
+# shellcheck disable=SC2016  # $1 belongs to the inner shell
+check bash -c 'cd "$1" && sha256sum -c --quiet SHA256SUMS' _ "$W/g/dest/owner"
+checkdesc="SHA256SUMS of the artifact has no owner/ line: it would fail where owner/ is not"
+# shellcheck disable=SC2016  # $1 belongs to the inner shell
+check bash -c '! grep -q "^owner/" "$1"' _ "$W/g/dest/SHA256SUMS"
+checkdesc="the owner's flash script is the release one"
+check cmp -s "$W/g/dest/owner/flash-diting.sh" "$SRC/ubuntu-diting/release/flash-diting.sh"
+rm -rf "$U/output/owner"
+checkdesc="pack-artifacts.sh without the owner image is refused"
+# shellcheck disable=SC2016  # $1, $2 and $3 belong to the inner shell
+check bash -c '! DITING_NOTHP=0 bash "$1" "$2" 2>"$3"' _ "$U/ci/pack-artifacts.sh" "$W/g/dest2" "$W/out.txt"
+expect "no owner image"
+absent "$W/g/dest2/owner"
+absent "$W/g/dest2/rootfs.img.xz.000"
 
 echo "== 10. ci/lint.sh on the real tree (the lint job's command)"
 (cd "$SRC" && bash "$SRC/ubuntu-diting/ci/lint.sh" >"$W/out.txt" 2>&1)
@@ -365,13 +409,138 @@ bad_paths="$(grep -oE '[A-Za-z0-9_./$-]+\.sh\b' "$WF" | sort -u | grep -v '\$' |
 checkdesc="every script path in build.yml exists and is executable (bad: ${bad_paths:-none})"
 check test -z "$bad_paths"
 echo "     script paths in build.yml: $(grep -oE '[A-Za-z0-9_./$-]+\.sh\b' "$WF" | sort -u | tr '\n' ' ')"
-# One step per stage, the ten of them in order, --resume from the second on.
+# One step per stage, the eleven of them in order, --resume from the second on.
 calls="$(grep -E '^[[:space:]]+run: .*ci/run-stage\.sh' "$WF" | sed -E 's/^[[:space:]]+run: [^ ]*run-stage\.sh[[:space:]]*//' | tr '\n' ';')"
 expected="check-host sources;"
-for s in kernel packages rootfs sensors libcamera phoc release verify; do expected="$expected--resume $s;"; done
-checkdesc="the ten stages, one step each, in order, --resume after the first (got: $calls)"
+for s in kernel packages rootfs sensors libcamera phoc release owner-release verify; do expected="$expected--resume $s;"; done
+checkdesc="the eleven stages, one step each, in order, --resume after the first (got: $calls)"
 check test "$calls" = "$expected"
 checkdesc="the workflow packs once, with run-pack.sh"; check test "$(grep -c 'ci/run-pack\.sh' "$WF")" -eq 1
+checkdesc="the owner image is uploaded as an artifact of its own"
+# shellcheck disable=SC2016  # ${{ env.REV }} is the workflow's expression, not the shell's
+check grep -qx '          name: diting-${{ env.REV }}-owner' "$WF"
+# Putting the key in is a local step after the download: the workflow does
+# not run the script, so it does not name it either.
+checkdesc="the workflow does not name add-ssh-key.sh"
+if grep -q 'add-ssh-key' "$WF"; then bad "$checkdesc"; else ok "$checkdesc"; fi
+
+echo "== 12. release/add-ssh-key.sh: its part for the container, on small images made here"
+# This container has the tools of the image add-ssh-key.sh builds (e2fsprogs,
+# android-sdk-libsparse-utils, xz-utils) and no docker. The part that runs in
+# the container (--inside) runs here, for real, on small ext4 images; the part
+# for the host runs with the docker stand-in, which plays the container by
+# running the command as it is. As any user: the owners the small images
+# start with want root or uid 1000, and the script sets its own either way.
+new_tree
+# Three keys made for these tests; the private halves were thrown away.
+KEY1='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJac11WmIZewZIskiOqj6NASt8ynMEK+o5QyFlNNSapQ ci-test-key-1'
+KEY2='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA8/i3NTWW1gV4CRtVC3+2r+PhzmoLjLQrZFRo3US7Y0 ci-test-key-2'
+KEY3='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDSaUCdShXWGnjQzJwSSVfsrscUZQKYs/2BUYzUiwrW9 ci-test-key-3'
+K="$W/k"; rm -rf "$K"
+# Called with --inside straight, DEST has to be there: in the script it is the host part that makes it.
+mkdir -p "$K/keys" "$K/a/flash" "$K/c/flash" "$K/d/flash" "$K/e/flash"
+printf '%s\n' "$KEY2" >"$K/keys/k2.pub"; printf '%s\n' "$KEY3" >"$K/keys/k3.pub"
+add="$U/release/add-ssh-key.sh"
+plain() { sed 's/\x1b\[[0-9;]*m//g' "$1"; }
+small_image() { # small_image DIR ssh|nossh: a 16 MB ext4 image with ubuntu (1000), as the sparse DIR/src/rootfs.img
+	mkdir -p "$1/root/etc" "$1/root/home/ubuntu" "$1/src"
+	printf 'root:x:0:0:root:/root:/bin/bash\nubuntu:x:1000:1000::/home/ubuntu:/bin/bash\n' >"$1/root/etc/passwd"
+	printf 'root:x:0:\nubuntu:x:1000:\n' >"$1/root/etc/group"
+	printf 'root:*:20000:0:99999:7:::\nubuntu:!:20000:0:99999:7:::\n' >"$1/root/etc/shadow"
+	printf 'KERNEL_RELEASE=test\nBUILD_DATE=test\n' >"$1/root/etc/diting-build"
+	if [ "$2" = ssh ]; then
+		mkdir -p "$1/root/home/ubuntu/.ssh"
+		printf '%s\n' "$KEY1" >"$1/root/home/ubuntu/.ssh/authorized_keys"
+		chown 1000:1000 "$1/root/home/ubuntu/.ssh" "$1/root/home/ubuntu/.ssh/authorized_keys" 2>/dev/null || true
+		chmod 700 "$1/root/home/ubuntu/.ssh"; chmod 600 "$1/root/home/ubuntu/.ssh/authorized_keys"
+	fi
+	chown 1000:1000 "$1/root/home/ubuntu" 2>/dev/null || true; chmod 750 "$1/root/home/ubuntu"
+	truncate -s 16M "$1/ext4.img"
+	mkfs.ext4 -q -F -b 4096 -d "$1/root" "$1/ext4.img"
+	img2simg "$1/ext4.img" "$1/src/rootfs.img"
+	for f in boot.img vendor_boot.img flash-diting.sh; do echo "$f" >"$1/src/$f"; done
+	chmod 755 "$1/src/flash-diting.sh"
+	(cd "$1/src" && sha256sum boot.img vendor_boot.img rootfs.img flash-diting.sh >SHA256SUMS)
+}
+fs() { debugfs -R "$1" "$2" 2>/dev/null; }	# kept in variables by the callers: under pipefail, `cmd | grep -q` fails when cmd is still writing
+keys_of() { fs "cat /home/ubuntu/.ssh/authorized_keys" "$1"; }
+mode_of() { awk '/^Inode:/{for (i = 1; i < NF; i++) if ($i == "Mode:") print $(i + 1)}'; }
+own_of() { awk '/^User:/{print $2, $4}'; }
+inode_is() { # inode_is RAW PATH TYPE MODE UID GID: this type, this mode, this owner
+	local st; st="$(fs "stat $2" "$1")"
+	[[ "$st" == *"Type: $3"* ]] && [ "$(mode_of <<<"$st")" = "$4" ] && [ "$(own_of <<<"$st")" = "$5 $6" ]
+}
+five="SHA256SUMS boot.img flash-diting.sh rootfs.img vendor_boot.img "
+verifies() { (cd "$1" && sha256sum -c --ignore-missing --quiet SHA256SUMS); }
+
+echo "-- a. the owner image as the CI artifact ships it (xz parts): one key in it, one new"
+small_image "$K/a" ssh
+mkdir -p "$K/a/parts"; (cd "$K/a/src" && cp boot.img vendor_boot.img flash-diting.sh "$K/a/parts/" && xz -T0 -c rootfs.img | split -b 100k -d -a 3 - "$K/a/parts/rootfs.img.xz.")
+(cd "$K/a/parts" && sha256sum boot.img vendor_boot.img rootfs.img.xz.* flash-diting.sh >SHA256SUMS)
+printf '%s\n' "$KEY2" | bash "$add" --inside ubuntu "$K/a/parts" "$K/a/flash" >"$W/out.txt" 2>&1
+rc_is 0 "$?"
+simg2img "$K/a/flash/rootfs.img" "$K/a/check.raw" 2>/dev/null
+checkdesc="authorized_keys: the key of the image, then the new one"; check test "$(keys_of "$K/a/check.raw")" = "$(printf '%s\n%s' "$KEY1" "$KEY2")"
+checkdesc="authorized_keys in the image is a regular file, 0600, 1000:1000"; check inode_is "$K/a/check.raw" /home/ubuntu/.ssh/authorized_keys regular 0600 1000 1000
+checkdesc=".ssh in the image is a directory, 0700, 1000:1000"; check inode_is "$K/a/check.raw" /home/ubuntu/.ssh directory 0700 1000 1000
+checkdesc="the changed image is a clean ext4 filesystem"
+# shellcheck disable=SC2016  # $1 and $2 belong to the inner shell
+check bash -c 'e2fsck -fn "$1" >/dev/null 2>&1' _ "$K/a/check.raw"
+checkdesc="the flash directory has exactly the five files"
+check test "$(cd "$K/a/flash" && find . -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort | tr '\n' ' ')" = "$five"
+checkdesc="the flash directory verifies against its SHA256SUMS"; check verifies "$K/a/flash"
+checkdesc="the summary line"; check plain "$W/out.txt" | grep -q '1 key(s) put in, 0 already there; authorized_keys has 2'
+checkdesc="it says the account has no password"; check grep -q "has no password" "$W/out.txt"
+
+echo "-- b. the part for the host, on the directory that was made: three keys, the source as it was"
+n="$(grep -c '^docker run' "$TEST_TOP/docker.log" 2>/dev/null || true)"
+(cd "$K/a/flash" && printf '%s\n' "$KEY3" "$KEY2" | env PATH="$W/bin:$PATH" bash "$add" "$K/a/flash2" "$K/keys/k3.pub" "$K/keys/k2.pub") >"$W/out.txt" 2>&1
+rc_is 0 "$?"
+simg2img "$K/a/flash2/rootfs.img" "$K/a/check2.raw" 2>/dev/null
+checkdesc="authorized_keys: three keys, the one that was there not repeated"; check test "$(keys_of "$K/a/check2.raw")" = "$(printf '%s\n%s\n%s' "$KEY1" "$KEY2" "$KEY3")"
+checkdesc="the summary line"; check plain "$W/out.txt" | grep -q '1 key(s) put in, 1 already there; authorized_keys has 3'
+checkdesc="the source still has its five files and verifies"
+# shellcheck disable=SC2016  # $1 and $2 belong to the inner shell
+check bash -c 'cd "$1" && [ "$(find . -mindepth 1 -maxdepth 1 -printf "%f\n" | LC_ALL=C sort | tr "\n" " ")" = "$2" ] && sha256sum -c --ignore-missing --quiet SHA256SUMS' _ "$K/a/flash" "$five"
+checkdesc="the second flash directory verifies"; check verifies "$K/a/flash2"
+checkdesc="two containers were asked for: the probe and the work"
+check test "$(grep -c '^docker run' "$TEST_TOP/docker.log")" = "$((n + 2))"
+checkdesc="the working container: no network, the user, read-only but /out"
+check grep -qF -- "--rm -i --network none --user $(id -u):$(id -g) -v $K/a/flash:/src:ro -v $K/a/flash2:/out -v $U/release:/tool:ro" "$TEST_TOP/docker.log"
+checkdesc="nothing privileged was asked for"
+# shellcheck disable=SC2016  # $1 and $2 belong to the inner shell
+check bash -c '! grep -q -- "--privileged" "$1"' _ "$TEST_TOP/docker.log"
+
+echo "-- c. an image whose user has no .ssh yet"
+small_image "$K/c" nossh
+printf '%s\n' "$KEY2" | bash "$add" --inside ubuntu "$K/c/src" "$K/c/flash" >"$W/out.txt" 2>&1
+rc_is 0 "$?"
+simg2img "$K/c/flash/rootfs.img" "$K/c/check.raw" 2>/dev/null
+checkdesc="authorized_keys was made, with the key in it"; check test "$(keys_of "$K/c/check.raw")" = "$KEY2"
+checkdesc=".ssh was made: a directory, 0700, 1000:1000"; check inode_is "$K/c/check.raw" /home/ubuntu/.ssh directory 0700 1000 1000
+checkdesc="authorized_keys: a regular file, 0600, 1000:1000"; check inode_is "$K/c/check.raw" /home/ubuntu/.ssh/authorized_keys regular 0600 1000 1000
+checkdesc="the changed image is a clean ext4 filesystem"
+# shellcheck disable=SC2016  # $1 and $2 belong to the inner shell
+check bash -c 'e2fsck -fn "$1" >/dev/null 2>&1' _ "$K/c/check.raw"
+expect "making /home/ubuntu/.ssh"
+
+echo "-- d. refused, and nothing of the image changed"
+n="$(grep -c '^docker run' "$TEST_TOP/docker.log" 2>/dev/null || true)"
+printf 'ssh-ed25519 AAAA not-a-key\n' >"$K/keys/junk.pub"
+(cd "$K/c/src" && env PATH="$W/bin:$PATH" bash "$add" "$K/flash-x" "$K/keys/junk.pub") >"$W/out.txt" 2>&1
+rc_not 0 "$?"
+expect "not a public key line"
+checkdesc="no container was asked for"; check test "$(grep -c '^docker run' "$TEST_TOP/docker.log")" = "$n"
+absent "$K/flash-x"
+small_image "$K/d" ssh; echo changed >>"$K/d/src/boot.img"
+printf '%s\n' "$KEY2" | bash "$add" --inside ubuntu "$K/d/src" "$K/d/flash" >"$W/out.txt" 2>&1
+rc_not 0 "$?"
+expect "does not match its SHA256SUMS: download it again"
+absent "$K/d/flash/rootfs.img"
+printf '%s\n' "$KEY2" | bash "$add" --inside nosuch "$K/c/src" "$K/e/flash" >"$W/out.txt" 2>&1
+rc_not 0 "$?"
+expect "no user 'nosuch' in the image"
+rm -rf "$K"
 
 echo
 echo "passed: $pass, failed: $fail"

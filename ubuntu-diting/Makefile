@@ -5,8 +5,8 @@ S := scripts
 SUDO ?= sudo -E
 
 .PHONY: help modemmanager phosh check-host sources check-latest-kernel update-kernel kernel dtbs phoc sensors libcamera \
-	dtbs-check packages vaapi firmware-setup mobile-config-firefox firmware rootfs release initramfs boot image verify repro-check qemu-test \
-	inspect-device lint clean distclean
+	dtbs-check packages vaapi firmware-setup mobile-config-firefox firmware rootfs release owner-release initramfs boot image verify \
+	repro-check qemu-test inspect-device lint clean distclean
 
 help:
 	@sed -n 's/^## //p' $(MAKEFILE_LIST)
@@ -81,6 +81,11 @@ image: rootfs
 release:
 	ROOTFS_PROFILE=public $(SUDO) $(S)/build-rootfs.sh
 	$(S)/build-release.sh
+## owner-release       owner image (locked account, build host's SSH key) with every local package:
+##                      the rootfs again, after make sensors libcamera phoc (needs root)
+owner-release:
+	$(SUDO) $(S)/build-rootfs.sh
+	$(S)/build-owner-release.sh
 ## repro-check          second full kernel build, compare bit for bit (slow)
 repro-check:
 	$(S)/check-reproducible.sh

@@ -86,23 +86,28 @@ jobs:
       # One step per stage. The log of a step is the output of its stage as it
       # runs, with a progress line every minute; when a stage fails, the end
       # of every build log it wrote follows there.
-      - name: "Stage 1 of 9: check-host, sources"
+      - name: "Stage 1 of 10: check-host, sources"
         run: ubuntu-diting/ci/run-stage.sh check-host sources
-      - name: "Stage 2 of 9: kernel"
+      - name: "Stage 2 of 10: kernel"
         run: ubuntu-diting/ci/run-stage.sh --resume kernel
-      - name: "Stage 3 of 9: packages"
+      - name: "Stage 3 of 10: packages"
         run: ubuntu-diting/ci/run-stage.sh --resume packages
-      - name: "Stage 4 of 9: rootfs (owner)"
+      - name: "Stage 4 of 10: rootfs (owner, base of the next three)"
         run: ubuntu-diting/ci/run-stage.sh --resume rootfs
-      - name: "Stage 5 of 9: sensors"
+      - name: "Stage 5 of 10: sensors"
         run: ubuntu-diting/ci/run-stage.sh --resume sensors
-      - name: "Stage 6 of 9: libcamera"
+      - name: "Stage 6 of 10: libcamera"
         run: ubuntu-diting/ci/run-stage.sh --resume libcamera
-      - name: "Stage 7 of 9: phoc"
+      - name: "Stage 7 of 10: phoc"
         run: ubuntu-diting/ci/run-stage.sh --resume phoc
-      - name: "Stage 8 of 9: release (public image)"
+      - name: "Stage 8 of 10: release (public image)"
         run: ubuntu-diting/ci/run-stage.sh --resume release
-      - name: "Stage 9 of 9: verify"
+      # The owner image has no SSH key (the runner has none). The key is put
+      # in after the download, on the machine the artifact goes to; that is
+      # a local step, not one of this workflow (ci/BUILD.md).
+      - name: "Stage 9 of 10: owner-release (owner image, for the maintainer)"
+        run: ubuntu-diting/ci/run-stage.sh --resume owner-release
+      - name: "Stage 10 of 10: verify"
         run: ubuntu-diting/ci/run-stage.sh --resume verify
       - name: Save the builder image and pack the artifacts
         env:
@@ -117,8 +122,20 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: diting-${{ env.REV }}
-          path: ${{ runner.temp }}/artifacts
+          # owner/ is the next artifact: on its own it is 2 GB to download,
+          # not 5.6.
+          path: |
+            ${{ runner.temp }}/artifacts
+            !${{ runner.temp }}/artifacts/owner/**
           compression-level: 0  # already compressed: xz and zstd
+          retention-days: 14
+          if-no-files-found: error
+      - name: Upload the owner image (no SSH key in it; ci/BUILD.md)
+        uses: actions/upload-artifact@v7
+        with:
+          name: diting-${{ env.REV }}-owner
+          path: ${{ runner.temp }}/artifacts/owner
+          compression-level: 0  # already compressed: xz
           retention-days: 14
           if-no-files-found: error
       - name: Upload the logs of the stages and of the build scripts

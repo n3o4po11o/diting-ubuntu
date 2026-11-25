@@ -7,6 +7,8 @@ with a device patch series.
 - **Install a released image:** [ubuntu-diting/release/INSTALL.md](ubuntu-diting/release/INSTALL.md)
   (images under Releases).
 - **Build it yourself:** [ubuntu-diting/README.md](ubuntu-diting/README.md).
+- **Owner image from the build workflow, with your SSH key in it**
+  (for the maintainer): [ubuntu-diting/docs/OWNER_IMAGE.md](ubuntu-diting/docs/OWNER_IMAGE.md).
 - **Hardware status:** [docs/BRINGUP_STATUS.md](docs/BRINGUP_STATUS.md),
   [ubuntu-diting/docs/KNOWN_ISSUES.md](ubuntu-diting/docs/KNOWN_ISSUES.md).
 - **Kernel tree** (v7.2.10 + the patches in `kernel/patches` as commits):

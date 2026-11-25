@@ -1,11 +1,11 @@
 # Build from zero in a container
 
 Everything this tree builds can be built from zero inside one container: the
-kernel, the packages, the owner rootfs, the packages that need a rootfs, and
-the public release. Every stage is timed and logged, and the results are
-packed for upload. The container comes from `Dockerfile` in this directory,
-so the tools do not depend on the host and a build can be repeated later.
-Nothing here flashes or boots a phone.
+kernel, the packages, the owner rootfs, the packages that need a rootfs, the
+public release and the owner image. Every stage is timed and logged, and the
+results are packed for upload. The container comes from `Dockerfile` in this
+directory, so the tools do not depend on the host and a build can be repeated
+later. Nothing here flashes or boots a phone.
 
 The host needs only Docker, a checkout of this tree and network access (and
 `zstd` to save the image). GitHub Actions runs the same steps (see GitHub
@@ -35,7 +35,10 @@ the end.
   (reference trees), ports.ubuntu.com, packages.mozilla.org and the snap
   store. `--network=host` gives the container the host's resolver.
 - **Disk.** About 65 GB for one run (source clones 6.5 GB, `work/` 41 GB,
-  `output/` 15 GB) plus 3.8 GB for the packed artifacts.
+  `output/` 15 GB) plus 3.8 GB for the packed artifacts. The owner image
+  (`owner-release`, added after the reference run) should cost about what the
+  public `rootfs.img` costs in both places, 4.5 GB and 1.8 GB; not measured
+  yet.
 - **Time.** Hours; see the stage table. Start the run detached.
 - **No phone data.** `device-data/` is not needed. Without it the header
   comparison against the stock boot images is skipped (`build-release.sh`
@@ -93,7 +96,7 @@ host with 8 cores and 10 GB RAM that was in use at the same time.
 To build only some stages, name them in `STAGES`, space separated:
 `-e STAGES="sources packages verify"` gives the device package and the checks
 of it in a few minutes, for a package to try on the phone. Every later call
-on the same tree then needs `--resume`. `DONE` appears only once all ten
+on the same tree then needs `--resume`. `DONE` appears only once all eleven
 stages have passed, also when they ran in several calls.
 
 ### 3. Save the builder image
@@ -131,12 +134,14 @@ docker run --rm \
 ### 5. Copy and check
 
 `DEST` is self-contained: copy the directory wherever artifacts are kept and
-check it there. The directory on the other host has to exist.
+check it there. The directory on the other host has to exist. `owner/` has
+the `SHA256SUMS` of its own, so it is checked on its own.
 
 ```sh
 name=$(basename "$DEST")
 tar -C "$(dirname "$DEST")" -cf - "$name" | ssh USER@HOST 'tar -C ~/incoming -xf -'
 ssh USER@HOST "cd ~/incoming/$name && sha256sum -c --quiet SHA256SUMS && echo OK"
+ssh USER@HOST "cd ~/incoming/$name/owner && sha256sum -c --quiet SHA256SUMS && echo OK"
 ```
 
 ## Stages
@@ -155,6 +160,7 @@ The last column is the reference run.
 | `libcamera` | `make libcamera` | Ubuntu's libcamera with the diting patches. | 14 min |
 | `phoc` | `make phoc` | Ubuntu's phoc with the diting patch. | 4 min |
 | `release` | `make release` | The public rootfs with every local package, the sparse image, the release archive in 950 MB parts. | 29 min |
+| `owner-release` | `make owner-release` | The owner rootfs built again, from zero and with every local package: locked account, no SSH key. Its boot images and sparse image in `output/owner/`. | not in the reference run |
 | `verify` | `make verify` | Host-side checks of the kernel, packages and rootfs. | 2 min |
 
 Why this order:
@@ -166,7 +172,12 @@ Why this order:
 - `make rootfs` does not depend on those three: it only warns when their
   packages are missing. An image built with `make rootfs` alone has no
   patched libcamera, no sensor clients and no patched phoc. `make release`
-  picks their packages up, because they are in `output/debs` by then.
+  and `make owner-release` pick their packages up, because they are in
+  `output/debs` by then.
+- `owner-release` follows the three for that reason, and it replaces
+  `work/rootfs`: the driver passes `FORCE_ROOTFS=1`, so the owner rootfs of
+  the image is built from zero. It comes after `release` because the public
+  image is the one everything else is for.
 
 ## Artifacts
 
@@ -180,13 +191,14 @@ vendor_boot.img                                20,807,680 bytes
 rootfs.img.xz.000, rootfs.img.xz.001           950,000,000 + 874,103,800 bytes
 ubuntu-diting-<date>.tar.xz.000, .001          950,000,000 + 908,065,032 bytes
 ubuntu-diting-<date>.SHA256SUMS
+owner/                                         not in the reference run: see The owner image
 diting-builder-<rev>.tar.zst                   214 MB
 release-meta/                                  flash script, install guide, package list
 BUILD-INFO                                     commit, kernel, builder image
 builder-packages.tsv                           the packages in the builder image
 stages.txt, stages.tsv                         result and seconds of every stage
 build-MANIFEST.txt, build-MANIFEST.sha256      what `make verify` checked
-SHA256SUMS                                     of everything above
+SHA256SUMS                                     of everything above but owner/
 ```
 
 - The three small files are the parts that get flashed or installed on their
@@ -201,6 +213,34 @@ SHA256SUMS                                     of everything above
   artifacts.
 - `diting-builder-<rev>.tar.zst` is the builder image (`zstd -dc … | docker
   load`), so the same tools can be used again however the archives have moved.
+
+### The owner image
+
+`owner/` is the image for the owner of a phone, from the `owner-release`
+stage: every local package; the boot images made inside its own rootfs, with
+`diting.debug=usb` on the kernel command line as in every owner build; the
+account locked, `sudo` without a password.
+
+```
+owner/boot.img, vendor_boot.img
+owner/rootfs.img.xz.000, .001                  the sparse rootfs image, xz-compressed
+owner/flash-diting.sh
+owner/BUILD-INFO, PACKAGES.tsv
+owner/SHA256SUMS                               of the owner/ files: on GitHub it is an artifact of its own
+```
+
+The image has no SSH key: the runner has none to put in, so both rootfs
+stages end with `WARN: no SSH public key installed`. sshd accepts keys only,
+and a locked account cannot unlock the screen either, so the image cannot be
+logged in to as it is.
+
+Putting the key in is a local step, on the Linux machine the artifact was
+downloaded to, with `ubuntu-diting/release/add-ssh-key.sh` of a checkout of
+this tree: `docs/OWNER_IMAGE.md` has it, step by step. The workflow neither
+runs that script nor ships it. Nothing of the step runs as root on the
+machine or mounts anything there: the work is done in a container, and in
+the container the image is never mounted (its files are written with
+`debugfs`, and `e2fsck` checks the filesystem before and after).
 
 ## Reference run
 
@@ -238,11 +278,12 @@ build tools all came from the image.
 - **build**, after lint: on pushes to main, on tags `v*`, weekly (Mondays
   03:23 UTC) and by hand, on a hosted arm64 runner (`ubuntu-24.04-arm`,
   free for public repositories), which is the native build of this page:
-  the ten stages of the table above, one step per stage (the first two
+  the eleven stages of the table above, one step per stage (the first two
   together), through `ci/run-stage.sh`; then `ci/run-pack.sh` saves the
-  image and packs the artifacts. Two workflow artifacts come out,
-  `diting-<rev>` (the directory of the Artifacts section) and
-  `diting-<rev>-logs`, kept for 14 days.
+  image and packs the artifacts. Three workflow artifacts come out, kept for
+  14 days: `diting-<rev>` (the directory of the Artifacts section without
+  `owner/`), `diting-<rev>-owner` (`owner/`, about 1.9 GB) and
+  `diting-<rev>-logs`.
 
 The log of a step is what the driver prints for its stage, live: the output
 of the stage, the progress line every minute, and when it fails the end of
@@ -261,10 +302,24 @@ workflow has removed the preinstalled SDKs (one unbroken run needs about 65
 GB), `sources` 4 minutes, `kernel` 28 minutes, `packages` 21 seconds. A
 hosted runner stops a job after 6 hours; the job's timeout is 350 minutes.
 
-Not verified on GitHub at the time of writing: the stages from `rootfs` on
-and the packing have not completed there (the first run to reach them was
-the one that got cancelled), and a cancellation stopping the processes of
-the running stage is tested with stand-ins only.
+Not verified at the time of writing. On GitHub, the stages from `rootfs` on
+and the packing have not completed (the first run to reach them was the one
+that got cancelled), a cancellation stopping the processes of the running
+stage is tested with stand-ins only, and so are the two upload steps that
+make `owner/` an artifact of its own. The `owner-release` stage has not run
+from zero anywhere: `build-owner-release.sh` and the packing were run on an
+owner image built on 2026-11-21, and on a 10 GB image with 770 MB of real
+files in it.
+
+`add-ssh-key.sh` is in two halves, and they are not verified alike. The
+half that runs in the container has run with the real tools (the debugfs,
+e2fsck, simg2img and xz of Debian 13) as a normal user on a host, on the
+small images of `ci/tests.sh` (section 12) and on that 10 GB image: after
+the change `e2fsck` is clean, and three 4 KB blocks of the image differ
+from before. The half that runs on the host, which is the docker call, has
+run only against the stand-in for docker: with a real docker it has not
+run, and no real artifact of the workflow has gone through the script. An
+image it made has not been flashed.
 
 ## What building from zero showed
 
