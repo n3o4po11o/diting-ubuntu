@@ -11,6 +11,8 @@ with a device patch series.
   (for the maintainer): [ubuntu-diting/docs/OWNER_IMAGE.md](ubuntu-diting/docs/OWNER_IMAGE.md).
 - **Hardware status:** [docs/BRINGUP_STATUS.md](docs/BRINGUP_STATUS.md),
   [ubuntu-diting/docs/KNOWN_ISSUES.md](ubuntu-diting/docs/KNOWN_ISSUES.md).
+- **Comparison with the SM8475 sibling port** (Xiaomi Pad 6 Pro, liuqin):
+  [docs/liuqin-study/](docs/liuqin-study/README.md).
 - **Kernel tree** (v7.2.10 + the patches in `kernel/patches` as commits):
   https://github.com/royka1/linux-diting
 
