@@ -17,7 +17,7 @@ linux-diting/
 ├── kernel/
 │   ├── patches/             patch series on top of the signed stable tag
 │   └── config/diting.config config fragment on top of arm64 defconfig
-├── tools/                   firmware builder, super/lp parser, ACDB/topology, camera, DSP diag tools
+├── tools/                   firmware builder, super/lp parser, ACDB/topology, camera, DSP diag, IMS tools
 ├── references/              upstream/community trees (make sources; git-ignored)
 ├── device-data/             PRIVATE dumps from the owner's phone (git-ignored, never published)
 └── ubuntu-diting/

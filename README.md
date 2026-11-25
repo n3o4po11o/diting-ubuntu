@@ -21,7 +21,7 @@ with a device patch series.
 | `ubuntu-diting/packages/libva-v4l2-stateful/` | patches for [libva-v4l2-stateful](https://github.com/sky1-linux/libva-v4l2-stateful) (VA-API over V4L2, iris decoder) | MIT (upstream) |
 | `ubuntu-diting/packages/libcamera/`, `phoc/`, `hexagonrpc/` | patches for Ubuntu's libcamera and phoc and for hexagonrpc | upstream licences (LGPL-2.1+, GPL-3.0+, GPL-3.0+) |
 | `ubuntu-diting/packages/audio-topology/` | AudioReach topology for the speakers | BSD-3-Clause macros from linux-msm/audioreach-topology |
-| `tools/` | firmware builder, Android super parser, ACDB/topology, camera and DSP tools | GPL-2.0-or-later |
+| `tools/` | firmware builder, Android super parser, ACDB/topology, camera, DSP and IMS tools | GPL-2.0-or-later |
 
 Upstream projects are fetched at pinned commits by `make sources`
 (`ubuntu-diting/config/diting.conf`); Ubuntu packages come from the Ubuntu
