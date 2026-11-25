@@ -1,0 +1,16 @@
+#!/bin/sh
+# diting-kernel-entrypoint, run as root when the kernel container starts
+# (ci/Dockerfile.kernel). The checkout is bind-mounted and owned by the user
+# who started the container: give that uid a name and a home, so that git,
+# dpkg and tmux behave as usual under `docker exec -u`.
+set -eu
+
+[ "$(id -u)" = 0 ] || exec "$@"
+uid="${HOST_UID:-1000}"
+gid="${HOST_GID:-$uid}"
+if ! getent passwd "$uid" >/dev/null; then
+	getent group "$gid" >/dev/null || groupadd -g "$gid" builder
+	useradd -m -u "$uid" -g "$gid" -d /home/builder -s /bin/bash builder
+fi
+
+exec "$@"

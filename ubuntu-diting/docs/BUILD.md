@@ -5,6 +5,12 @@ with every stage timed and the results packed for upload; that is the
 repeatable way and is described in `ci/BUILD.md`. The rest of this page is
 about building directly on a host.
 
+For the kernel alone nothing has to be installed on the host at all:
+`ci/KERNEL.md` builds the toolchain of this page into an image
+(`ci/Dockerfile.kernel`) and runs the kernel targets in it. That is how the
+kernel has been built since 2026-11-26, on a Debian 13 x86_64 host with
+nothing but git, docker, rsync and tmux on it.
+
 ## Host
 
 Tested host: Armbian 26.2.1 (Debian 13 trixie), **native aarch64** (CIX P1, 12
@@ -26,7 +32,7 @@ python3 -m venv ../tools/venv && ../tools/venv/bin/pip install dtschema   # for 
 (`mkbootimg`/`unpack_bootimg` come from Debian's `mkbootimg` package;
 `fdtput`/`fdtget` from `device-tree-compiler`.)
 
-### openSUSE Tumbleweed x86_64 (current build host since 2026-10-14)
+### openSUSE Tumbleweed x86_64 (the build host from 2026-10-14 until 2026-11-26)
 
 Kernel r37 onward is cross-built on a Ryzen 7 5800X (16 threads, about 14
 minutes for a clean kernel build) because the CIX P1 host corrupts memory

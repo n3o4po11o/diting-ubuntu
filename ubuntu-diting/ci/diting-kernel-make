@@ -1,0 +1,14 @@
+#!/bin/bash
+# diting-kernel-make: what ci/kernel.sh `make` runs inside tmux in the kernel
+# container. The command is in $DITING_MAKE (a shell command line, so that
+# nothing has to be quoted on the way through docker exec and tmux); its
+# output goes to $DITING_MAKE_LOG with the exit status of the command at the
+# end. With pipefail that is the status of make, not of tee.
+set -o pipefail
+
+: "${DITING_MAKE:?}" "${DITING_MAKE_LOG:?}"
+log_dir="$(dirname "$DITING_MAKE_LOG")"
+mkdir -p "$log_dir"
+echo "# $(date -u +%FT%TZ) $DITING_MAKE" >> "$DITING_MAKE_LOG"
+bash -c "$DITING_MAKE" 2>&1 | tee -a "$DITING_MAKE_LOG"
+echo "EXIT=$?" >> "$DITING_MAKE_LOG"

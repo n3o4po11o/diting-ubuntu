@@ -1,0 +1,58 @@
+# Kernel development image for ubuntu-diting: everything that builds,
+# packages and inspects the kernel of this tree, in one image, so that a
+# build host needs nothing but git and docker for the kernel. ci/KERNEL.md
+# has the commands and the package list by role.
+#
+#   docker build -t diting-kernel:$REV -f ubuntu-diting/ci/Dockerfile.kernel ubuntu-diting/ci
+#   ubuntu-diting/ci/kernel.sh shell          # a bash in the container, the checkout at /src
+#   ubuntu-diting/ci/kernel.sh make kernel    # a Makefile target, in tmux inside the container
+#
+# The base image is the one of ci/Dockerfile (the from-zero builder), pinned
+# by digest: a kernel built here is built with the same Debian 13 toolchain
+# (docs/BUILD.md) as the one the builder image builds. /usr/share/diting-kernel-packages.tsv
+# in the image lists what it contains.
+FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG VCS_REF=unknown
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+		ca-certificates sudo tzdata \
+		git gnupg curl rsync patch \
+		build-essential bc bison flex libssl-dev libelf-dev libdw-dev dwarves \
+		python3 python3-venv python3-pip perl pkg-config \
+		kmod cpio xz-utils zstd lz4 e2fsprogs \
+		dpkg-dev debhelper fakeroot \
+		gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu libc6-dev-arm64-cross \
+		qemu-user-static \
+		device-tree-compiler mkbootimg android-sdk-libsparse-utils \
+		gdb-multiarch crash bpftool sparse python3-pyelftools elfutils \
+		libncurses-dev \
+		tmux file less vim-tiny \
+	&& rm -rf /var/lib/apt/lists/* \
+# The checkout is bind-mounted from the host and owned by another user.
+	&& git config --system --add safe.directory '*' \
+# dtschema for `make dtbs-check` has no Debian package. build-dtbs.sh expects
+# it in tools/venv of the checkout; kernel.sh makes that venv from these
+# wheels, so the running container needs no network for it.
+	&& python3 -m venv /tmp/wheel-venv \
+	&& /tmp/wheel-venv/bin/pip download --quiet --dest /opt/wheels dtschema \
+	&& rm -rf /tmp/wheel-venv
+
+# What the image contains, for the build record.
+RUN dpkg-query -W -f='${Package}\t${Version}\n' > /usr/share/diting-kernel-packages.tsv
+
+# diting-kernel-entrypoint: at container start, give the uid that owns the
+# checkout a name and a home, so that git, dpkg and tmux behave as usual for
+# `docker exec -u` (the container itself runs as root for that one step).
+# diting-kernel-make: what ci/kernel.sh `make` runs inside tmux.
+COPY diting-kernel-entrypoint diting-kernel-make /usr/local/sbin/
+RUN chmod 755 /usr/local/sbin/diting-kernel-entrypoint /usr/local/sbin/diting-kernel-make
+
+LABEL org.opencontainers.image.title="diting-kernel" \
+	org.opencontainers.image.description="Kernel build and debug environment for ubuntu-diting (Debian 13, ci/KERNEL.md)" \
+	org.opencontainers.image.revision="${VCS_REF}"
+
+WORKDIR /src/ubuntu-diting
+ENTRYPOINT ["/usr/local/sbin/diting-kernel-entrypoint"]
+CMD ["sleep", "infinity"]
