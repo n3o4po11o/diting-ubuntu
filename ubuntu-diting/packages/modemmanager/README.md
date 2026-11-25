@@ -6,6 +6,16 @@ this directory, built as `<ubuntu version>diting3` (`LOCAL_SUFFIX` in the
 script, raised for every patch added). `device-xiaomi-diting` pins `*diting*`
 versions so the archive package does not replace it.
 
+There is no ModemManager source tree in this repository to see the patches
+applied in: the patches are kept here, next to the two source archives, and
+the build script copies them into `debian/patches` of the archive version
+and runs `quilt`. `git log -- ubuntu-diting/packages/modemmanager` shows
+the commit that added each: `0001` in `739cc5b` (2026-10-14), `0002` in
+`2f6d917` (2026-11-22), `0003` in `480bf10` (2026-11-25). The fixes of
+2026-11-24 and 2026-11-25 for the restart, the redial, the network mode and
+the NAS fields are not in ModemManager: they are the scripts and units of
+`device-xiaomi-diting` (`b5ab5d9`).
+
 - `0001-netlink-fix-use-after-free-...`: upstream commit 9317cbc4 (Dan
   Williams, 2026-10-04). `transaction_complete()` read `tr->completion_fn`
   after removing (and so freeing) the transaction; after a resume, when

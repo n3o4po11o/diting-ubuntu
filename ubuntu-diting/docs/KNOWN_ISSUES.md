@@ -680,6 +680,12 @@ hook's disconnect, the restart, the watchdog's dial 59 s later, connected
 line. A crash or a SIGKILL cannot be intercepted: the old five minutes
 then.
 
+One case is not covered (2026-11-25, 21:35): a connection that was
+already dead, connected with no packets. The restart of ModemManager by
+`diting-modem-redial` ran the hook's disconnect, and the two dials after
+it were throttled all the same; data came 2 min 38 s after the restart.
+The record of the day has the sequence.
+
 ## Calls on China Telecom: 47 seconds of dialling, then terminated (2026-11-25, OPEN)
 
 `mmcli -m any --voice-create-call` as root (as a user over SSH PolicyKit
@@ -696,8 +702,297 @@ What there is, and what is missing:
   a client is bound to it).
 - libqmi 1.38 queries only: IMS registration status, IMS services status,
   the IMS service enable setting, and the IMS PDN (`imsdcm`).
-- The IMS stack itself, SIP registration and call control, runs on the AP
-  in Android (imsdatadaemon, imsrtp, libimsma and the IMS app); none of
-  it is on this image.
+- The IMS stack itself, SIP registration and call control, is in the modem
+  firmware, not on the AP: `modem.mbn` has the SIP stack and the
+  registration manager, and the vendor libraries of Android have no SIP.
+  What the AP has is the IMS bearer (APN `ims`) and a QMI service for the
+  modem, 0x302. Both were done by hand on this image; the modem still does
+  not register. Next section.
 - `diting-voice-call` starts the audio graphs while ModemManager has a
   call; it has not been exercised here.
+
+## VoLTE: the IMS bearer is the AP's to bring up, the registration is not started (2026-11-25, OPEN)
+
+Read from the vendor libraries of this phone (`lib-imscommon`,
+`lib-imsservice`, `libdsi_netctrl`, `libqdi`, `libqmiservices`) with
+Ghidra, and tried on the modem with raw QMI over QRTR.
+
+- The AP hosts QMI service 0x302 (`imsdcm`; libqmi's definitions have its
+  three messages since 1.37). As soon as it is there the modem sends 0x23
+  (its link-local address and port 9099), 0x2e (register app state) and
+  0x34 (RCS service mask). The daemon of this phone answers 0x2e with the
+  result alone (and sets a property for the framework); an older daemon,
+  in a trace of another phone, answered `0x10 = 0x5f` and its modem then
+  asked for the bearer (0x20). Both answers were given here; the modem
+  never asks. The link-local handshake on that service is for RCS, not
+  for registration.
+- The IMS bearer the modem accepts: `Start Network` with APN `ims`, IP
+  family IPv6 (TLV 0x19 = 6), extended technology preference link-local
+  (TLV 0x34 = 0x8888) and call type embedded (TLV 0x35 = 1), after
+  `Bind Subscription` and `Bind Mux Data Port`: result 0. The same
+  without TLV 0x34 is `CallFailed`, verbose 2/210, "IPv6 PDN call
+  disallowed"; IPv4 is 2/208, "IPv4 PDN call disallowed": the IMS APN of
+  China Telecom takes IPv6, and only as link-local. The bearer has no
+  global address: `Get Current Settings` gives a `fe80::`/64 address and
+  gateway. Android's library asks the modem first with WDS 0xFFF2 (route
+  look up); the modem answers result 0 and no mux id. With the call up
+  and nothing else done for six minutes, then with 0x302 hosted for
+  three and a half minutes more, the modem did not restart; the data call
+  is not affected.
+- A `PDP Activate` indication sent on 0x302 by hand, with the bearer up
+  and the handshake answered, changes nothing. Its PDP id is the one the
+  AP gives when it answers the modem's own `PDP Activate Request`, and
+  the modem never sends one here.
+- Not what starts the modem: the IMS settings (voice over LTE, SMS, XCAP,
+  service and autoconfig enabled, read back as enabled); NAS
+  voice-centric, IMS PS voice preferred, CS and PS for a minute; the
+  bearer and the handshake together; IMSA indications registered for
+  ninety seconds. IMSA says `not-registered`, error 0, and
+  `ue_to_tas_service_status` `available` on WWAN: no attempt is made.
+- `rmtfs` runs with `-r -P -s`. In rmtfs 1.1.1 `-P` means the raw EFS
+  partitions and `-r` read-only: the modem starts from the Android EFS
+  as it is on disk, and what is written goes to memory only, so a reboot
+  drops it. PDC lists no software configuration selected; to Get Default
+  Config Info the modem answers `SW_DEFAULT`. The 25 software
+  configurations of the EFS have names through Get Config Info; the one
+  for China Telecom is `VoLTE_OPNMKT_CT`, id `5B411D9B…`. The AP side
+  has none: the `mbnconfig` partition is all zeros and `cust` has no
+  mcfg tree.
+- The carrier configuration applied the way the RIL of the phone does it
+  (`libxiaomi_qcril.so`): PDC Set Selected, then PDC Activate 0x27 with
+  activation type 0. The modem applies it online: NAS becomes CS and PS,
+  voice-centric, IMS PS voice preferred, the profiles become `ctnet`,
+  `IMS`, `ctwap`, `sos`, and IMSA and IMS settings stay up. The modem
+  camps on LTE and still does not register or ask for the bearer. Done
+  with a modem stop and start instead, it came up without IMSA (0x21)
+  and IMS settings (0x12), with a network rejection on LTE and without
+  the selection. PDC Deactivate 0x2B holds only until the next modem
+  restart, which brings the configuration back and resets the NAS
+  fields; after the activation PDC lists no platform configuration any
+  more, where one was active before. A reboot undoes all of it.
+- What else the RIL does at start, replayed without effect: PDC 0x2E
+  switches the modem's auto selection on (the RIL reads the state from
+  EFS, `/nv/item_files/mcfg/mcfg_autoselect_by_uim`); after a modem
+  restart with it on, the handshake on 0x302 ran 0x23, 0x34, 0x23, 0x2e,
+  0x34, 0x33 as in the trace of the other phone, then stopped, and
+  nothing was selected. IMS settings 0x2A with TLVs 0x11, 0x1F, 0x2D,
+  0x31 set, as the RIL's IMS module does at its start. "Set IMS
+  registration" of the RIL is IMS settings 0x8F with "service enabled"
+  for the registered state, sent after NAS voice domain PS preferred;
+  both were set.
+- The EFS can be read with the service the RIL uses for it: Xiaomi's
+  extension service 0xFFE4, message 0x02, command 4 in the payload.
+  `/nv/item_files/ims/IMS_enable` and `ims_operation_mode` are 0, on
+  both subscriptions.
+- The firmware's own carrier rules map 460-03/05/11/12 to `CT`,
+  `volte="true"`, carrier index 19.
+- Not found: what starts the registration.
+
+Two accidents while trying, for the record:
+
+- The rmnet driver keeps the data format per physical port, and
+  `rmnet_newlink` resets it to the default for every link created without
+  flags. `ip link add link rmnet_ipa0 … type rmnet mux_id N` without
+  `ingress-deaggregation on ingress-mapv5-checksum on
+  egress-mapv5-checksum on` (the flags of ModemManager's link) made the AP
+  send every frame in a format the modem's IPA does not expect. The modem
+  stopped with `IPA Assert … IRQ_STTS: 0x00016080` twice (16:22, 16:41)
+  and remoteproc recovered it both times. A link on rmnet_ipa0 is only
+  added with those flags.
+- A raw `Set System Selection Preference` with the mode mask 0x0004, meant
+  as LTE only: in libqmi's layout gsm is 2, umts 4, lte 8, td-scdma 16,
+  5gnr 32. The restore, 0x0016, has neither LTE nor 5G, and writes of
+  0x002C did not take until ModemManager set the modes: eight minutes
+  without service (17:16 to 17:24). Modes are changed through
+  ModemManager, `mmcli -m 0 --set-allowed-modes="3g|4g|5g"
+  --set-preferred-mode="5g"` as root, not with raw QMI.
+
+The tools are in the repository's `tools/ims/`, not in the image:
+`diting-dcm.py` (hosts 0x302, answers the modem, sends indications),
+`diting-imshelper.py` (the same, and brings the bearer and its link up by
+itself when the modem asks), `diting-imscall.py` (the bearer and its
+link with the port's flags; stops both on exit), `diting-rawqmi.py`,
+`diting-ims.py` (status, settings, PDC), `diting-pdc.py` and
+`diting-pdc-names.py` (carrier configurations: list, selected, default,
+names), `diting-efs.py` (reads EFS items).
+
+## The day of 2026-11-25 on ModemManager and IMS: what changed, what was tried (RECORD)
+
+### What changed in the image
+
+Three commits, all on `main`, not pushed when this was written:
+
+- `480bf10` modemmanager diting3: patch `0003` in
+  `packages/modemmanager/`, `src/mm-shared-qmi.c`, the first active slot
+  with a SIM is the primary one (+20/−6); README and
+  `build-modemmanager.sh` with it.
+- `b5ab5d9` device 0.7.35: `diting-mm-stop` as the stop hook of
+  ModemManager (`50-diting-clean-disconnect.conf`), `diting-modem-redial`
+  with the dial after a ModemManager start and the session activation on
+  a SIM swap, `diting-modem-setup` keeping the network mode
+  (`diting-modem-mode.service`), `diting-nas-pref`. No ModemManager source
+  in it: these fixes are scripts and units around ModemManager.
+- `244bb83` docs: the sections of 2026-11-24 and 2026-11-25 above.
+
+The patches of ModemManager are quilt patches kept next to Ubuntu's
+source archives in `packages/modemmanager/`, not in a source tree:
+`build-modemmanager.sh` copies them into `debian/patches` of the archive
+version and builds `1.25.95-1ubuntu1diting3`. `0001` came with `739cc5b`
+(2026-10-14), `0002` with `2f6d917` (2026-11-22), `0003` with `480bf10`.
+
+With all of it installed, the phone was rebooted once, at 21:12. The
+mode and the NAS fields were the configured ones, and the shutdown
+before had gone through the hook's disconnect (NetworkManager
+deactivated the connection as ModemManager stopped, 21:12:16). The dial
+after that boot was not clean, from the journal: the first two attempts,
+82 s and 137 s after boot, were refused as `pdn-ipv4-call-throttled` and
+`pdn-ipv6-call-throttled`, data was up at 199 s, and `diting-modem-redial`
+backed off for the throttle at 21:17:02.
+
+### What was tried on IMS, in order
+
+All of it with tools outside the image and raw QMI; nothing of it is in
+the image. The modem's EFS is a copy in memory (`rmtfs -r`), so every
+write below lasted until the reboot at the end.
+
+1. 16:15 to 16:18. `Start Network` for APN `ims` with a client type in
+   `Bind Mux Data Port` (TLV 0x13: none, 1, 2, 255), on mux 20 to 27:
+   refused, 2/208, 2/241 or 2/236. The WDS route look up 0xFFF2 answers
+   result 0 for `ims` with IPv6 and the link-local preference only.
+2. 16:18. With TLV 0x34 = 0x8888: accepted (handle 0x120e3cd0, mux 21);
+   the same call on mux 0 gave the same handle.
+3. 16:21. 0x302 hosted: the handshake. 16:22: the first modem crash (the
+   rmnet link without flags), recovered by remoteproc.
+4. 16:28 to 16:38. The bearer alone for six minutes, then with 0x302
+   hosted for three and a half: no crash. 16:41: the second crash, the
+   same mistake with the link up.
+5. 16:46 to 16:51. Bearer, link with the flags, the modem's address on
+   it; `PDP Activate` and `Address Change` indications, first with a
+   wrong layout, then with the right one (instance 1, the address the
+   network gave): no reaction. A probe left a second bearer without an
+   owner; removed by a modem restart at 17:03.
+6. 17:04. The whole sequence once more from a modem restart: not
+   registered.
+7. 17:12. NAS voice-centric, IMS PS voice preferred, CS and PS for a
+   minute (a first attempt at 17:08 had not taken): not registered, the
+   owner's fields written back.
+8. 17:16 to 17:24. The mode mask mistake: eight minutes without service
+   (above).
+9. 17:29 to 17:37. `VoLTE_OPNMKT_CT` selected and the modem stopped and
+   started: applied, but no IMSA and no IMS settings, a network
+   rejection on LTE, no selection afterwards. A second start: generic.
+10. 17:50, 20:37, 20:59. 0x2e answered with `0x5f`: no change.
+11. 19:42 to 19:45. The modem's auto selection switched on (PDC 0x2E),
+    then a modem restart: nothing selected; the handshake in the order
+    of the other phone's trace at the activation only.
+12. 20:24 to 20:31. The carrier configuration selected and activated
+    online; `Start Network` without the link-local preference refused
+    with the named reasons; bearer, link and indications once more: not
+    registered.
+13. 20:50 to 20:53. IMS settings 0x2A as the RIL sends it; EFS items
+    read. 20:56: IMSA indications registered for ninety seconds.
+14. 21:00 to 21:09. Deactivate, auto selection off, a modem restart: the
+    configuration came back with the NAS fields of the carrier, and no
+    platform configuration; activate for the platform and an empty
+    selected list: no change.
+15. 21:12. The phone rebooted to drop all of it.
+16. 21:44 to 21:54. The tools, collected into the repository
+    (`tools/ims/`, `8e2a810`), run once more as they are there: the
+    read-only requests; 0x302 hosted three times for 3 to 15 s, the modem
+    sending 0x23, 0x2e and 0x34 at once each time; one IMS data call for
+    30 s on mux 12, accepted and stopped, its link deleted. Not
+    registered.
+
+Counted in the trials above: two modem crashes, five modem restarts by
+hand, one reboot; and two recoveries, not by hand, of
+`diting-modem-redial` after the reboot (next section).
+
+### The cellular connection after the reboot: two recoveries by diting-modem-redial
+
+`diting-modem-redial` probes the cellular path once a minute with a ping
+bound to `qmapmux0.0`, and acts when three probes fail while
+NetworkManager shows the connection activated ("connected, no packets"):
+the first time it restarts ModemManager, the second time the modem
+firmware too. Both happened in the boot of 21:12:
+
+- 21:16:01: data up. 21:17:02: back-off for 15 minutes, for a throttled
+  dial in ModemManager's log.
+- 21:33 to 21:35: three probes failed. 21:35:11: ModemManager
+  restarted. The hook's disconnect ran (NetworkManager deactivated the
+  connection at 21:35:11), and the two dials after it were throttled all
+  the same (21:35:48, 21:36:48). 21:37:49: data up, 2 min 38 s after the
+  restart. 21:39:52: back-off again, during which nothing probes the
+  path.
+- 21:54:53 to 21:56:58: the first three probes after the back-off
+  failed. 21:56:59: the modem firmware stopped and started, ModemManager
+  restarted at 21:57:16; registered at 21:57:55, data up at 21:58:09 on
+  the first dial, no throttle. A ping bound to `qmapmux0.0` was answered
+  at 21:59:45.
+
+What made the path dead is not determined. Neither connection was probed
+between its dial and the failed probes that ended it: the back-off
+followed each dial. Both were dialled after two throttled attempts; the
+one after the restart of the firmware, on the first dial, has held. Each
+may have come up dead, as the header of `diting-modem-redial` describes
+for a fresh bearer after a mid-session disconnect, or died later. What
+ran on the modem in those windows: a read-only check at 21:27 (the
+selected carrier configuration, NAS queries) in the first, the tools of
+item 16 in the second. In the boot before, from 17:04 to 21:12, the same
+probe found nothing wrong in four hours of IMS trials, the IMS data call
+included. The layers known before this day are in CN-ADAPTATION.md
+("zombie bearers after redial", the network's PDN throttle); here the
+watchdog did what it is there for, twice in 22 minutes.
+
+A check that proved nothing: after item 16, pings to 223.5.5.5 were
+answered, and the path was taken as fine. They left over Wi-Fi, the
+default route of the lower metric; only a ping bound to `qmapmux0.0`
+says something about the cellular path.
+
+A probe of its own then, with no IMS tool running: a ping bound to
+`qmapmux0.0` every 8 s from 22:03:14 to 22:20:13, 125 of them, all
+answered. The connection of 21:58:09 was alive from its fifth minute to
+its twenty-second; the two before were first found dead 17 minutes after
+their dial, unprobed until then.
+
+### diting-hardware-recovery: the USB controller reset every two minutes, one reset oopsed the kernel
+
+Not ModemManager, but the same day on the same phone, and still there
+(OPEN):
+
+- `check_usb` takes `usb0` without carrier for a stuck gadget whenever
+  the Type-C data role contains "device" (here `host [device]`), and
+  with no cable attached `usb0` has no carrier anyway. The result is
+  `recover_usb`, an unbind and a bind of `dwc3-qcom` and
+  `diting-usb-gadget start`, every 126 s: 15 times in the boot of 21:12
+  from 21:14:53 on, 97 times between 05:41 and 09:47 in the boot before.
+- 21:42:16: one of those binds oopsed the kernel: `Unable to handle
+  kernel NULL pointer dereference at virtual address 0x10` in
+  `usb_ep_alloc_request`, called from `composite_dev_prepare` and
+  `configfs_composite_bind` under `dwc3_qcom_probe`. The endpoint it
+  was given was NULL (x0 in the trace), the one `composite_dev_prepare`
+  takes from the gadget. The oops killed the script (SIGSEGV); systemd
+  started it again at 21:42:26.
+- 21:44:26: the next reset began and never logged "recovery done". The
+  script (`/bin/sh`, PID 8977) has been in state D since, most likely in
+  the write to the driver's `bind` or `unbind`, the only steps of the
+  reset that run without a child process. It cannot be stopped, so the
+  next shutdown may wait on it.
+- Not touched. The check has to leave the controller alone when no host
+  is attached, and a reset has to take the gadget down before the
+  controller is rebound.
+
+### The phone at the end
+
+After the reboot of 21:12: mode UMTS, LTE, 5G with 5G preferred; PS
+only, data-centric, CS preferred; registered on 5G, at home; no modem
+crash since boot; no IMS link; the rmnet port's data format as
+ModemManager left it; nothing left in `/tmp` and `/run` from the trials.
+The cellular connection is the one of 21:58:09, after the second
+recovery, probed as above. The mode and the NAS fields were read again
+at 22:20, after the restart of the firmware: unchanged.
+
+### The owner's observation
+
+The owner watched the cellular network over this day of debugging and
+found it very stable (their words, 21:16). The journal of the same
+evening has the two recoveries above, at 21:35 and 21:57.

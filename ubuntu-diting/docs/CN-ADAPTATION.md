@@ -139,5 +139,7 @@ throttling), worked out 2026-11-21/24. Fixes are commits on the
    swap with this version is still to do.
 5. **VoLTE**: a call stays in `dialing` for 47 s and is terminated; the
    modem runs the IMS services, libqmi only queries them, and the IMS
-   stack (SIP registration, call control) runs on the AP in Android. See
-   KNOWN_ISSUES.md, 2026-11-25.
+   stack (SIP registration, call control) is in the modem firmware. The
+   bearer and the modem's data service (QMI 0x302) were done by hand; the
+   modem does not start the registration. See KNOWN_ISSUES.md,
+   2026-11-25.
