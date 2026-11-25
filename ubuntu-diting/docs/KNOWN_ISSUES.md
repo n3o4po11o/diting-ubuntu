@@ -203,7 +203,41 @@ Several reboots hung at the end of `systemd-shutdown` after iris sessions;
 the owner had to hold the power key. Removing the iris module while the
 core is initialised deadlocks (`iris_core_deinit` holds `core->lock` and
 calls `disable_irq()`, while the IRQ thread waits for that lock); the
-shutdown hang may be the same path. Not yet confirmed.
+shutdown hang may be the same path. Not yet confirmed; the deadlock itself
+is, see the next entry.
+
+### The iris error path deadlocks when the firmware watchdog fires (2026-11-26)
+
+Reproduced on the decode path, on formal-7.2.10-52 with the r54 DTB. Twelve
+VA-API decoders were started at once on the one iris decoder (to read which
+OPP the core runs at; one at a time is what the tests before it used, and
+nothing in between was tried). The firmware's CPU watchdog fired
+(`received watchdog interrupt`, `cpu watchdog error received`, `system
+error of type 0x5000001`); the sessions started after it got `system error
+of type 0x5000003`, then `core init failed`, a WARNING in
+`vb2_start_streaming`, and `Unbalanced enable for IRQ 218` from `iris_open()`
+→ `iris_core_init()` → `iris_vpu_power_on()`.
+
+From then on three parties wait for each other and nothing but a reboot ends
+it (kernel stacks of that boot, uptime 27661 s):
+
+- `kworker/0:0+events` runs `iris_sys_error_handler()`:
+  `iris_core_deinit()` → `iris_vpu_power_off()` → `disable_irq()` →
+  `__synchronize_irq()`, holding `core->lock`;
+- `irq/218-iris` sits in `iris_hfi_isr_handler()`, waiting for `core->lock`;
+- every process that then closes a session (`VIDIOC_STREAMOFF` →
+  `iris_session_streamoff()` → `iris_hfi_gen2_session_stop()` →
+  `iris_hfi_queue_cmd_write()`, in the runtime PM resume of the device) goes
+  to D state and stays there; eight `ffmpeg` were left like that, `SIGKILL`
+  included.
+
+Hardware decoding is gone for that boot; the rest of the system was not
+affected (USB, SSH, display). This is the deadlock the entry above suspects
+for the shutdown hang, on a path decode alone reaches. The fix belongs in
+`iris_core_deinit()` and the ISR: not disabling the IRQ under `core->lock`,
+and failing opens and session stops with an error once the core is in the
+error state, instead of resuming the device. Until then, few decode sessions
+at a time, and a reboot when `dmesg` shows the watchdog lines.
 
 ### Char-device use-after-free at boot (oops in `kobj_lookup`)
 
