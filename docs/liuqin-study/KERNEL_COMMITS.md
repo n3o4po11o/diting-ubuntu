@@ -540,3 +540,51 @@ listener”在 7.2.10 的上游代码里**没有**（上游只有内核内的 `a
   （0105；`dynamic-power-coefficient` 与 DECISIONS D21 相悖）、OTG dts（0098）、TDM（0047）。
 - 对方系列内部已被取代的：`42a085d01c31`（被 `cb62545d4f62` 撤销）、`c7d4d4ca507b` 和
   `7ec2c1f628c0` 的 debugfs 那一半（被 `95cf27cbc2e7` 删除）。
+
+## 8. 采纳记录（driver-fix 分支）
+
+第一批按 §6 的顺序做成了补丁，放在 `kernel/patches/0106`–`0114`。**都还不在 git
+历史里**：按项目的规矩，手机上跑过新内核之后才提交。
+
+| 补丁 | 来源 | 内容 | 状态 |
+| --- | --- | --- | --- |
+| 0106 | 上游 stable `812aa5346482`（原样） | HFI 中断只清 CM3 fault 位 | BUILD-TESTED |
+| 0107 | 上游 stable `2379434f8d3b`（原样） | 启动 GMU 前屏蔽 HFI 中断 | BUILD-TESTED |
+| 0108 | 上游 `8464e2284fec`（原样） | `disp_cc_mdss_mdp_clk_src` 的 ops | BUILD-TESTED |
+| 0109 | 上游 `eb34e2804ce4`（原样） | Lucid Ole PLL 已使能时跳过配置 | BUILD-TESTED |
+| 0110 | liuqin `594134933699`（原样） | GENI 串口挂起期间屏蔽中断 | BUILD-TESTED |
+| 0111 | liuqin `355dd22d6a31`（移植：只是落点不同，7.2 的冷/热启动判定多了 a8xx 分支） | 挂死恢复时强制冷启动 | BUILD-TESTED |
+| 0112 | liuqin `5bbdbea6a307`（移植：只有最后一个 hunk 的上下文不同） | glink 暂存端点就绪前的消息 | BUILD-TESTED |
+| 0113 | liuqin `787d0f7bf966`（改写：挂在我们自己的 `bat_prop_constant_current` 标志上，属性仍列出但返回 `-ENODATA`） | 电量计数 mAh → µAh，去掉占位的 `power_now` 和时间估计 | **DEVICE-TESTED**（热加载，见下） |
+| 0114 | 上游 stable `04854437df76`（移植：只有后面的上下文不同） | 电源设备不注册为唤醒源 | **DEVICE-TESTED**（热加载，见下） |
+
+“原样”是相对我们“v7.2.10 + 0001–0105”的树说的：零模糊度直接套上，`git am` 不需要模糊
+匹配。两个“移植”的代码与原补丁相同，只是重新生成了上下文。作者和提交说明都保留原作者的，
+末尾加一段 `Origin:` 说明出处和移植时改了什么。
+
+**编译**（内核容器，见 `ubuntu-diting/ci/KERNEL.md`）：先从零编了一遍不带新补丁的基线
+（14 分钟，日志里 0 条 warning），再加上这九个补丁增量编译：正好重编 6 个源文件，0 条
+warning；`linux-image` 包与基线相比只有 6 个文件不同——内核镜像、`System.map`、`msm.ko`
+（a6xx_gmu）、`dispcc-sm8450.ko`、`qcom_battmgr.ko`，外加 changelog 的时间戳。
+
+**手机上的验证（不改 boot 分区）**：`qcom_battmgr` 是模块，内核配置又与手机上运行的内核
+逐字节相同，所以把新编的 `qcom_battmgr.ko` 放进 `/lib/modules/7.2.10-diting/updates/`，
+`depmod -a` 后卸载重载（项目以前测 0091、0093 用过同样的办法）。同一个内核、同一块电池：
+
+| | 手机自带的模块 | 带补丁的模块 |
+| --- | --- | --- |
+| `charge_counter`（满电） | 4103 | **4103000** |
+| `power_now`（电流为 0 时） | 10000000 | 无数据 |
+| `time_to_full_avg` / `time_to_empty_avg` | 0 / 65535 | 无数据 |
+| 三个电源设备的 `power/wakeup*` 属性 | 各 9 个 | **0 个** |
+| upower | 按 10 W 上报 | `energy-rate: 0 W`，日志无错误 |
+
+USB 电源照常 `online=1`。测完已删掉 `updates/` 里的文件并重载回原模块，手机恢复原状。
+
+**还没验证的**：0106–0112 要换内核镜像才能测（GENI 串口和 glink 是内建的，GMU 在 `msm.ko`
+里），而装包会改写活动槽的 boot 分区——按 `docs/SAFE_TESTING.md`，这一步由机主决定。待测
+的就是 §6 第一批列的验收项：T45b 的场景下 GMU 是否还会 OOB 超时、超时后能否恢复；开机
+dmesg 里 `rcg didn't update its configuration` 是否消失；挂起后蓝牙是否还在；DSP 服务是否
+稳定出现。0114 对挂起的影响（充电器通知不再唤醒系统）也还没有测。
+
+第二批（充电整组、GPU 终止故障策略、dts 的电压投票）和第三批（USB3 / DP）没有动。

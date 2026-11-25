@@ -87,7 +87,7 @@ FPC 专属的。已经查清的：
 | [FEATURE_MATRIX.md](FEATURE_MATRIX.md) | 对方硬件支持表 25 项逐项对照 diting，附实测明细 |
 | [VIDEO_DECODE.md](VIDEO_DECODE.md) | H.264 / HEVC / VP9 / AV1 能力矩阵、正确性、性能、发现的问题 |
 | [FINGERPRINT.md](FINGERPRINT.md) | diting 指纹硬件与 TA 的鉴定，QSEECOM 现状，对方栈分析，实验顺序 |
-| [KERNEL_COMMITS.md](KERNEL_COMMITS.md) | 348 个提交的审计、逐主题精读与关键代码、采纳顺序 |
+| [KERNEL_COMMITS.md](KERNEL_COMMITS.md) | 348 个提交的审计、逐主题精读与关键代码、采纳顺序；§8 是采纳记录（第一批补丁 0106–0114 的状态） |
 | [ROOTFS.md](ROOTFS.md) | 对方 rootfs 的构建管线、启动模型、deb 包、应用清单、diting 的三种用法 |
 
 ## 对方项目概况
@@ -120,8 +120,9 @@ FPC 专属的。已经查清的：
 
 ## 还没做的
 
-- 没有写任何补丁，也没有编译或刷机。KERNEL_COMMITS §6 给了采纳顺序和每一步的验收方法。
-  按项目流程应该本地写补丁 → rsync → tmux 编译 → 手机实测 → 再提交。
+- 第一批补丁（0106–0114）已写好并在内核容器里编译通过，其中电量单位的两个在手机上
+  用热加载验证过；其余七个要换内核镜像才能测，还没有刷到手机上，补丁也还没提交。
+  状态和验收项见 [KERNEL_COMMITS.md §8](KERNEL_COMMITS.md)。
 - diting 是否真的没有 SuperSpeed 走线：只有 OTG.md 的结论和原厂 DT 的 `high-speed`，固件经
   UCSI 报告的端口能力是 `usb2 [usb3]`，没有实测。
 - VP9 的 GStreamer 坏帧、VA-API 10-bit 坏画面只确认了现象，没有查根因。
