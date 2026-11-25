@@ -543,8 +543,9 @@ listener”在 7.2.10 的上游代码里**没有**（上游只有内核内的 `a
 
 ## 8. 采纳记录（driver-fix 分支）
 
-第一批按 §6 的顺序做成了补丁，放在 `kernel/patches/0106`–`0114`。**都还不在 git
-历史里**：按项目的规矩，手机上跑过新内核之后才提交。
+第一批按 §6 的顺序做成了补丁，放在 `kernel/patches/0106`–`0115`（后九个来自 §6，0115 是
+核对时带上的，见下）。**都还不在 git 历史里**：按项目的规矩，手机上跑过新内核之后才
+提交。
 
 | 补丁 | 来源 | 内容 | 状态 |
 | --- | --- | --- | --- |
@@ -557,6 +558,7 @@ listener”在 7.2.10 的上游代码里**没有**（上游只有内核内的 `a
 | 0112 | liuqin `5bbdbea6a307`（移植：只有最后一个 hunk 的上下文不同） | glink 暂存端点就绪前的消息 | BUILD-TESTED |
 | 0113 | liuqin `787d0f7bf966`（改写：挂在我们自己的 `bat_prop_constant_current` 标志上，属性仍列出但返回 `-ENODATA`） | 电量计数 mAh → µAh，去掉占位的 `power_now` 和时间估计 | **DEVICE-TESTED**（热加载，见下） |
 | 0114 | 上游 stable `04854437df76`（移植：只有后面的上下文不同） | 电源设备不注册为唤醒源 | **DEVICE-TESTED**（热加载，见下） |
+| 0115 | **不是来自 liuqin**：本仓库 `encoder` 分支的 `0111-…-iris-Raise-MXC-…`，原样 | iris 在 366 / 444 MHz 两档把 MXC 提到下游要求的档位 | 手机上现跑的内核已经带着它 |
 
 “原样”是相对我们“v7.2.10 + 0001–0105”的树说的：零模糊度直接套上，`git am` 不需要模糊
 匹配。两个“移植”的代码与原补丁相同，只是重新生成了上下文。作者和提交说明都保留原作者的，
@@ -566,6 +568,16 @@ listener”在 7.2.10 的上游代码里**没有**（上游只有内核内的 `a
 （14 分钟，日志里 0 条 warning），再加上这九个补丁增量编译：正好重编 6 个源文件，0 条
 warning；`linux-image` 包与基线相比只有 6 个文件不同——内核镜像、`System.map`、`msm.ko`
 （a6xx_gmu）、`dispcc-sm8450.ko`、`qcom_battmgr.ko`，外加 changelog 的时间戳。
+
+**0115 是核对时发现的**：把容器编出的 DTB 与手机上现刷的 r54 DTB 对比，只有一处不同——
+iris（视频编解码器）OPP 表里 366 和 444 MHz 两档的 `required-opps`。手机上的 MXC 是
+SVS_L1 和 NOMINAL，仓库里的 0079 是 SVS 和 SVS_L1。追下去是 `encoder` 分支的提交
+`7731dea`（"iris OPP table - raise MXC to the downstream corner"）：下游驱动要求这两档
+在 MXC 和 MMCX 上都是 SVS_L1 和 NOMINAL，仓库原来的表让视频核心在最高的两档工作在
+规格之外，“解码碰巧没事，编码一起动就让整个 SoC 复位”。这个修复只在 `encoder` 分支上，
+`main` 没有。它不属于 liuqin 的审计，但 `driver-fix` 要从 `main` 出发构建，不带它的话
+测出来的内核在视频这一项会比手机上现跑的倒退，所以原样放进这一批。带上之后 DTB 与
+r54 的那个逐字节相同（见 `release/driver-fix-batch1/README.md`）。
 
 **手机上的验证（不改 boot 分区）**：`qcom_battmgr` 是模块，内核配置又与手机上运行的内核
 逐字节相同，所以把新编的 `qcom_battmgr.ko` 放进 `/lib/modules/7.2.10-diting/updates/`，
@@ -581,10 +593,13 @@ warning；`linux-image` 包与基线相比只有 6 个文件不同——内核�
 
 USB 电源照常 `online=1`。测完已删掉 `updates/` 里的文件并重载回原模块，手机恢复原状。
 
-**还没验证的**：0106–0112 要换内核镜像才能测（GENI 串口和 glink 是内建的，GMU 在 `msm.ko`
-里），而装包会改写活动槽的 boot 分区——按 `docs/SAFE_TESTING.md`，这一步由机主决定。待测
-的就是 §6 第一批列的验收项：T45b 的场景下 GMU 是否还会 OOB 超时、超时后能否恢复；开机
-dmesg 里 `rcg didn't update its configuration` 是否消失；挂起后蓝牙是否还在；DSP 服务是否
-稳定出现。0114 对挂起的影响（充电器通知不再唤醒系统）也还没有测。
+**还没验证的**：0106–0112 要换内核镜像才能测——GENI 串口和 glink 是内建的，GMU 在
+`msm.ko` 里，而换镜像意味着改写活动槽的 boot 分区。装包本身不刷写（手机上的钩子只在
+`/boot/diting/` 下重新生成镜像），但在启动镜像换上去之前重启，跑的会是旧内核配新模块，
+这个组合没有测过。按 `docs/SAFE_TESTING.md`，刷写这一步由机主决定。0115 的设备树改动
+就是手机上现在跑的，不需要再测。待测的是 §6 第一批列的验收项：T45b 的场景下 GMU 是否
+还会 OOB 超时、超时后能否恢复；开机 dmesg 里 `rcg didn't update its configuration` 是否
+消失；挂起后蓝牙是否还在；DSP 服务是否稳定出现。0114 对挂起的影响（充电器通知不再唤醒
+系统）也还没有测。
 
 第二批（充电整组、GPU 终止故障策略、dts 的电压投票）和第三批（USB3 / DP）没有动。
