@@ -1,6 +1,19 @@
 #!/bin/bash
-# Fetch the locked upstream stable kernel and the read-only reference trees.
-# Never resets or modifies an existing checkout.
+# Fetch the locked upstream stable kernel, and nothing else: this is `make
+# sources`, the first step of every build.
+#
+# The other trees under references/ are not fetched here. What a build needs
+# (the AudioReach topology, fastrpc, hexagonrpc, libssc, ...) is fetched by
+# that build when it gets there (need_ref in lib.sh). What is only read by
+# hand is fetched one at a time, by name:
+#
+#   fetch-sources.sh --ref sm8450-fdt [NAME...]   make reference NAME=sm8450-fdt
+#   fetch-sources.sh --references                 make references: all of those
+#   fetch-sources.sh --all                        the kernel and every tree
+#
+# Never resets or modifies an existing checkout of the kernel or of a tree
+# that is only read. An existing checkout of a build input is put on its
+# pinned commit, as its build would put it.
 . "$(dirname "$0")/lib.sh"
 need git gpg
 
@@ -29,6 +42,20 @@ fetch_kernel() {
 	log "kernel $KERNEL_TAG: signature by $KERNEL_TAG_SIGNER_FPR verified"
 }
 
+# The trees that are only read: community and vendor sources to compare with.
+# A line each: name, URL, and the branch where not the default one.
+references() {
+	cat <<EOF
+sm8450-linux https://github.com/sm8450-mainline/linux next
+sm8450-fdt https://github.com/sm8450-mainline/fdt
+sm8450-pmaports-archive https://github.com/sm8450-mainline/pmaports
+pmaports-current https://gitlab.postmarketos.org/postmarketOS/pmaports.git
+lineage-diting https://github.com/LineageOS/android_device_xiaomi_diting
+lineage-sm8450-common https://github.com/LineageOS/android_device_xiaomi_sm8450-common
+xiaomi-sm8475-dev-diting https://github.com/Xiaomi-SM8475-Development/android_device_xiaomi_diting
+EOF
+}
+
 fetch_ref() { # dir url [branch]
 	local dir="$DITING_TOP/references/$1"
 	if [ -d "$dir/.git" ]; then
@@ -39,42 +66,61 @@ fetch_ref() { # dir url [branch]
 	fi
 }
 
-fetch_kernel
-if [ "${1:-}" != "--kernel-only" ]; then
-	fetch_ref sm8450-linux https://github.com/sm8450-mainline/linux next
-	fetch_ref sm8450-fdt https://github.com/sm8450-mainline/fdt
-	fetch_ref sm8450-pmaports-archive https://github.com/sm8450-mainline/pmaports
-	fetch_ref pmaports-current https://gitlab.postmarketos.org/postmarketOS/pmaports.git
-	fetch_ref lineage-diting https://github.com/LineageOS/android_device_xiaomi_diting
-	fetch_ref lineage-sm8450-common https://github.com/LineageOS/android_device_xiaomi_sm8450-common
-	fetch_ref xiaomi-sm8475-dev-diting https://github.com/Xiaomi-SM8475-Development/android_device_xiaomi_diting
-fi
-# Build input (not just reference): topology macros at the pinned commit.
-fetch_ref audioreach-topology "$AUDIOREACH_TOPOLOGY_URL"
-git -C "$DITING_TOP/references/audioreach-topology" checkout -q "$AUDIOREACH_TOPOLOGY_COMMIT" ||
-	die "audioreach-topology: cannot check out $AUDIOREACH_TOPOLOGY_COMMIT"
-# Build inputs: ACDB parser (voice topology), FastRPC userspace (audio PD),
-# hexagonrpcd (sensor DSP file server), libssc and iio-sensor-proxy (sensors).
-fetch_ref ar-audioreach-graphservices "$AUDIOREACH_GRAPHSERVICES_URL"
-git -C "$DITING_TOP/references/ar-audioreach-graphservices" checkout -q "$AUDIOREACH_GRAPHSERVICES_COMMIT" ||
-	die "ar-audioreach-graphservices: cannot check out $AUDIOREACH_GRAPHSERVICES_COMMIT"
-fetch_ref fastrpc "$FASTRPC_URL"
-git -C "$DITING_TOP/references/fastrpc" checkout -q "$FASTRPC_COMMIT" ||
-	die "fastrpc: cannot check out $FASTRPC_COMMIT"
-fetch_ref hexagonrpc "$HEXAGONRPC_URL"
-git -C "$DITING_TOP/references/hexagonrpc" checkout -q "$HEXAGONRPC_COMMIT" ||
-	die "hexagonrpc: cannot check out $HEXAGONRPC_COMMIT"
-fetch_ref libssc "$LIBSSC_URL"
-git -C "$DITING_TOP/references/libssc" checkout -q "$LIBSSC_COMMIT" ||
-	die "libssc: cannot check out $LIBSSC_COMMIT"
-fetch_ref iio-sensor-proxy "$IIO_SENSOR_PROXY_URL"
-git -C "$DITING_TOP/references/iio-sensor-proxy" checkout -q "$IIO_SENSOR_PROXY_COMMIT" ||
-	die "iio-sensor-proxy: cannot check out $IIO_SENSOR_PROXY_COMMIT"
-# VA-API driver for the iris decoder (packages/libva-v4l2-stateful patches it)
-fetch_ref libva-v4l2-stateful "$LIBVA_V4L2_URL"
-git -C "$DITING_TOP/references/libva-v4l2-stateful" cat-file -e "$LIBVA_V4L2_COMMIT^{commit}" ||
-	die "libva-v4l2-stateful: commit $LIBVA_V4L2_COMMIT missing"
-# Firefox mobile configuration (packages/mobile-config-firefox)
-fetch_ref mobile-config-firefox "$MOBILE_CONFIG_FIREFOX_URL"
-git -C "$DITING_TOP/references/mobile-config-firefox" cat-file -e "$MOBILE_CONFIG_FIREFOX_COMMIT^{commit}" ||
-	die "mobile-config-firefox: commit $MOBILE_CONFIG_FIREFOX_COMMIT missing"
+# The trees a build needs, each at the commit pinned in config/diting.conf.
+inputs() {
+	printf '%s\n' audioreach-topology ar-audioreach-graphservices fastrpc hexagonrpc \
+		libssc iio-sensor-proxy libva-v4l2-stateful mobile-config-firefox
+}
+
+input() { # name
+	case "$1" in
+	audioreach-topology) need_ref "$1" "$AUDIOREACH_TOPOLOGY_URL" "$AUDIOREACH_TOPOLOGY_COMMIT" ;;
+	ar-audioreach-graphservices) need_ref "$1" "$AUDIOREACH_GRAPHSERVICES_URL" "$AUDIOREACH_GRAPHSERVICES_COMMIT" ;;
+	fastrpc) need_ref "$1" "$FASTRPC_URL" "$FASTRPC_COMMIT" ;;
+	hexagonrpc) need_ref "$1" "$HEXAGONRPC_URL" "$HEXAGONRPC_COMMIT" ;;
+	libssc) need_ref "$1" "$LIBSSC_URL" "$LIBSSC_COMMIT" ;;
+	iio-sensor-proxy) need_ref "$1" "$IIO_SENSOR_PROXY_URL" "$IIO_SENSOR_PROXY_COMMIT" ;;
+	libva-v4l2-stateful) have_ref "$1" "$LIBVA_V4L2_URL" "$LIBVA_V4L2_COMMIT" ;;
+	mobile-config-firefox) have_ref "$1" "$MOBILE_CONFIG_FIREFOX_URL" "$MOBILE_CONFIG_FIREFOX_COMMIT" ;;
+	*) die "no source named $1 (--help lists them)" ;;
+	esac
+}
+
+fetch_one() { # name: a tree that is only read, else a build input
+	local line
+	line="$(references | awk -v n="$1" '$1 == n')"
+	if [ -n "$line" ]; then
+		# shellcheck disable=SC2086  # one line of the table: name url [branch]
+		fetch_ref $line
+	else
+		input "$1"
+	fi
+}
+
+usage() {
+	cat <<EOF
+usage: fetch-sources.sh                 the locked kernel, signature-checked (make sources)
+       fetch-sources.sh --ref NAME...   only these trees (make reference NAME=NAME)
+       fetch-sources.sh --references    the trees that are only read (make references)
+       fetch-sources.sh --all           the kernel and every tree
+names:
+$(references | cut -d' ' -f1; inputs)
+EOF
+	exit "${1:-1}"
+}
+
+case "${1:-}" in
+	"" | --kernel-only) fetch_kernel ;;  # --kernel-only: what the default is now
+	--ref)
+		shift
+		[ $# -gt 0 ] || usage
+		for name in "$@"; do fetch_one "$name"; done ;;
+	--references)
+		while read -r name url branch; do fetch_ref "$name" "$url" "$branch"; done < <(references) ;;
+	--all)
+		fetch_kernel
+		while read -r name url branch; do fetch_ref "$name" "$url" "$branch"; done < <(references)
+		for name in $(inputs); do input "$name"; done ;;
+	--help | -h) usage 0 ;;
+	*) echo "unknown argument: $1" >&2; usage ;;
+esac

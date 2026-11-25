@@ -6,10 +6,8 @@
 need git
 
 R="$DITING_TOP/references"
-[ "$(git -C "$R/audioreach-topology" rev-parse HEAD 2>/dev/null)" = "$AUDIOREACH_TOPOLOGY_COMMIT" ] ||
-	die "need references/audioreach-topology at $AUDIOREACH_TOPOLOGY_COMMIT (make sources)"
-[ "$(git -C "$R/ar-audioreach-graphservices" rev-parse HEAD 2>/dev/null)" = "$AUDIOREACH_GRAPHSERVICES_COMMIT" ] ||
-	die "need references/ar-audioreach-graphservices at $AUDIOREACH_GRAPHSERVICES_COMMIT (make sources)"
+need_ref audioreach-topology "$AUDIOREACH_TOPOLOGY_URL" "$AUDIOREACH_TOPOLOGY_COMMIT"
+need_ref ar-audioreach-graphservices "$AUDIOREACH_GRAPHSERVICES_URL" "$AUDIOREACH_GRAPHSERVICES_COMMIT"
 
 src="$WORK/diting-firmware-setup-pkg"
 rm -rf "$src" && mkdir -p "$src/tools/camera" "$src/tools/acdb" "$src/audioreach-topology" "$src/graphservices"

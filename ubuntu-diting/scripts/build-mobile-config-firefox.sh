@@ -6,8 +6,7 @@
 need git
 
 UPSTREAM="$DITING_TOP/references/mobile-config-firefox"
-git -C "$UPSTREAM" cat-file -e "$MOBILE_CONFIG_FIREFOX_COMMIT^{commit}" 2>/dev/null ||
-	die "missing $UPSTREAM at $MOBILE_CONFIG_FIREFOX_COMMIT (make sources)"
+have_ref mobile-config-firefox "$MOBILE_CONFIG_FIREFOX_URL" "$MOBILE_CONFIG_FIREFOX_COMMIT"
 src="$WORK/mobile-config-firefox-pkg"
 rm -rf "$src" && mkdir -p "$src"
 git -C "$UPSTREAM" archive "$MOBILE_CONFIG_FIREFOX_COMMIT" | tar -x -C "$src"

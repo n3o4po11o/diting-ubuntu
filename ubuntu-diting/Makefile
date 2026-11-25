@@ -4,7 +4,7 @@
 S := scripts
 SUDO ?= sudo -E
 
-.PHONY: help modemmanager phosh check-host sources check-latest-kernel update-kernel kernel dtbs phoc sensors libcamera \
+.PHONY: help modemmanager phosh check-host sources reference references check-latest-kernel update-kernel kernel dtbs phoc sensors libcamera \
 	dtbs-check packages vaapi firmware-setup mobile-config-firefox firmware rootfs release owner-release initramfs boot image verify \
 	repro-check qemu-test inspect-device lint clean distclean
 
@@ -14,9 +14,15 @@ help:
 ## check-host           verify host tools
 check-host:
 	$(S)/check-host.sh
-## sources              fetch locked kernel (signature-checked) and references
+## sources              fetch the locked kernel only (signature-checked)
 sources:
 	$(S)/fetch-sources.sh
+## reference NAME=x     fetch one tree under references/ by name (a build fetches what it needs itself)
+reference:
+	$(S)/fetch-sources.sh --ref $(NAME)
+## references          the trees under references/ that are only read, all of them
+references:
+	$(S)/fetch-sources.sh --references
 ## check-latest-kernel  compare kernel.lock with kernel.org (read-only)
 check-latest-kernel:
 	$(S)/check-latest-kernel.sh

@@ -5,12 +5,11 @@
 # in the arm64 buildd chroot (qemu-user) elsewhere; libyaml is a build and
 # runtime dependency, so it is in Depends.
 . "$(dirname "$0")/lib.sh"
-need dpkg-deb autoreconf libtoolize make gcc
+need dpkg-deb autoreconf libtoolize make gcc git
 
 PKG=fastrpc-diting
+need_ref fastrpc "$FASTRPC_URL" "$FASTRPC_COMMIT"
 SRC="$DITING_TOP/references/fastrpc"
-[ "$(git -C "$SRC" rev-parse HEAD 2>/dev/null)" = "$FASTRPC_COMMIT" ] ||
-	die "need $SRC at $FASTRPC_COMMIT (make sources)"
 build_native() {
 	(cd "$b/src" && sh ./autogen.sh && ./configure --prefix=/usr --libdir=/usr/lib/aarch64-linux-gnu &&
 		make -j"$(nproc)" && make install DESTDIR="$b/root") > "$OUT/logs/fastrpc-build.log" 2>&1

@@ -43,9 +43,8 @@ for t in "$@"; do
 	echo "make: entering the $t stage"
 	case "$t" in
 	check-host) ;;
-	sources)
-		mkdir -p "$T/references/x" "$T/kernel/upstream" "$T/kernel/.gnupg"
-		echo x >"$T/references/x/f"
+	sources)  # the kernel, and nothing else
+		mkdir -p "$T/kernel/upstream" "$T/kernel/.gnupg"
 		echo x >"$T/kernel/upstream/f" ;;
 	kernel)
 		mkdir -p "$U/work/kernel-src" "$U/work/kernel-obj" "$U/output/debs" "$U/output/kernel"
@@ -391,7 +390,12 @@ rc_is 0 "$rc"
 [ "$rc" = 0 ] || cat "$W/out.txt" >&2
 checkdesc="shellcheck is the one of the image"
 check test "$(shellcheck --version | sed -n 's/^version: //p')" = 0.10.0
-(cd "$SRC" && grep -rIlE '^#!([^ ]*/)?(env +)?(ba|da|k)?sh( |$)' --exclude-dir=.git . | sort |
+# Not the generated trees of .gitignore: on a checkout that has built
+# already they hold the kernel source with its thousands of scripts, which
+# took this scan from seconds to a quarter of an hour.
+(cd "$SRC" && grep -rIlE '^#!([^ ]*/)?(env +)?(ba|da|k)?sh( |$)' --exclude-dir=.git \
+	--exclude-dir=upstream --exclude-dir=references --exclude-dir=build --exclude-dir=.gnupg \
+	--exclude-dir=device-data --exclude-dir=venv --exclude-dir=work --exclude-dir=output . | sort |
 	xargs shellcheck -x -S error -f gcc 2>/dev/null | grep " error: " | cut -d: -f1 | sort | uniq -c) >"$W/outside.txt"
 echo "     error-level shellcheck findings in the whole tree (lint.sh covers a part of it):"
 sed 's/^/       /' "$W/outside.txt"
@@ -541,6 +545,90 @@ printf '%s\n' "$KEY2" | bash "$add" --inside nosuch "$K/c/src" "$K/e/flash" >"$W
 rc_not 0 "$?"
 expect "no user 'nosuch' in the image"
 rm -rf "$K"
+
+echo "== 13. sources: the kernel alone by make sources, a tree when it is needed"
+# Two trees on disk stand in for the remote ones: one with two commits, the
+# pinned one first, and one of another history.
+R="$W/remotes"
+rm -rf "$R"
+mkdir -p "$R/input" "$R/other"
+git -C "$R/input" init -q
+git -C "$R/input" config uploadpack.allowFilter true
+echo one >"$R/input/f"
+git -C "$R/input" add f
+git -C "$R/input" -c user.name=t -c user.email=t@t commit -qm one
+one="$(git -C "$R/input" rev-parse HEAD)"
+echo two >"$R/input/f"
+git -C "$R/input" -c user.name=t -c user.email=t@t commit -qam two
+git -C "$R/other" init -q
+echo other >"$R/other/f"
+git -C "$R/other" add f
+git -C "$R/other" -c user.name=t -c user.email=t@t commit -qm other
+new_tree
+S="$TEST_TOP/ubuntu-diting/scripts"
+# lib.sh under test is the one in the tree; DITING_NOTHP=0 keeps it from
+# putting the command under its no-THP wrapper. $S, $R and $one are expanded
+# by the inner shell, which has them in its environment.
+# shellcheck disable=SC2016
+LIB='. "$S/lib.sh";'
+(cd "$TEST_TOP" && S="$S" DITING_NOTHP=0 bash -c "$LIB need_ref t-input 'file://$R/input' $one" >"$W/out.txt" 2>&1)
+rc_is 0 "$?"
+expect "cloning t-input"
+checkdesc="need_ref: the tree is at the pinned commit, an older one than the clone's own head"
+check test "$(git -C "$TEST_TOP/references/t-input" rev-parse HEAD)" = "$one"
+checkdesc="need_ref: with that commit's file"
+check test "$(cat "$TEST_TOP/references/t-input/f")" = one
+(cd "$TEST_TOP" && S="$S" DITING_NOTHP=0 bash -c "$LIB need_ref t-input 'file://$R/input' $one" >"$W/out.txt" 2>&1)
+rc_is 0 "$?"
+noexpect "cloning"
+checkdesc="need_ref: a tree that is there is left alone"
+check test "$(git -C "$TEST_TOP/references/t-input" rev-parse HEAD)" = "$one"
+# A checkout made by hand, on another commit, is put on the pinned one.
+git clone -q "file://$R/input" "$TEST_TOP/references/t-hand"
+checkdesc="made by hand: on the newer commit"
+check test "$(git -C "$TEST_TOP/references/t-hand" rev-parse HEAD)" != "$one"
+(cd "$TEST_TOP" && S="$S" DITING_NOTHP=0 bash -c "$LIB need_ref t-hand 'file://$R/input' $one" >"$W/out.txt" 2>&1)
+rc_is 0 "$?"
+noexpect "cloning"
+checkdesc="need_ref: an existing checkout is put on the pinned commit"
+check test "$(git -C "$TEST_TOP/references/t-hand" rev-parse HEAD)" = "$one"
+# have_ref needs the commit to be there, not to be checked out.
+(cd "$TEST_TOP" && S="$S" DITING_NOTHP=0 bash -c "$LIB have_ref t-arch 'file://$R/input' $one" >"$W/out.txt" 2>&1)
+rc_is 0 "$?"
+checkdesc="have_ref: the tree stays on the commit the clone made"
+check test "$(git -C "$TEST_TOP/references/t-arch" rev-parse HEAD)" != "$one"
+# A tree of another history does not have the commit: said, and not used.
+(cd "$TEST_TOP" && S="$S" DITING_NOTHP=0 bash -c "$LIB need_ref t-other 'file://$R/other' $one" >"$W/out.txt" 2>&1)
+rc_not 0 "$?"
+expect "has no commit"
+# The command line: a tree by name, the names, and nothing fetched for a wrong call.
+cp "$SRC"/ubuntu-diting/scripts/fetch-sources.sh "$S/"
+(cd "$TEST_TOP" && DITING_NOTHP=0 bash "$S/fetch-sources.sh" --ref nosuchtree >"$W/out.txt" 2>&1)
+rc_not 0 "$?"
+expect "no source named nosuchtree"
+absent "$TEST_TOP/kernel/upstream"
+(cd "$TEST_TOP" && DITING_NOTHP=0 bash "$S/fetch-sources.sh" --ref >"$W/out.txt" 2>&1)
+rc_not 0 "$?"
+expect "usage: fetch-sources.sh"
+(cd "$TEST_TOP" && DITING_NOTHP=0 bash "$S/fetch-sources.sh" --help >"$W/out.txt" 2>&1)
+rc_is 0 "$?"
+checkdesc="the names of the seven trees that are only read and of the eight a build needs"
+check test "$(grep -cE '^[a-z0-9-]+$' "$W/out.txt")" -eq 15
+# What the requirement comes down to, where it is written down.
+F="$SRC/ubuntu-diting/scripts/fetch-sources.sh"
+checkdesc="fetch-sources.sh without an argument fetches the kernel and nothing else"
+check grep -qE '^	"" \| --kernel-only\) fetch_kernel ;;' "$F"
+checkdesc="the Makefile says so"
+check grep -q '^## sources *fetch the locked kernel only' "$SRC/ubuntu-diting/Makefile"
+checkdesc="no build script sends anyone to make sources any more"
+if grep -l '(make sources)' "$SRC"/ubuntu-diting/scripts/build-*.sh >/dev/null 2>&1; then bad "$checkdesc"; else ok "$checkdesc"; fi
+checkdesc="every tree a build asks for is one fetch-sources.sh knows"
+missing=""
+for n in $(grep -hoE '^(need_ref|have_ref) [a-z0-9-]+' "$SRC"/ubuntu-diting/scripts/build-*.sh | cut -d' ' -f2 | sort -u); do
+	grep -qx "$n" "$W/out.txt" || missing="$missing $n"
+done
+check test -z "$missing"
+rm -rf "$R"
 
 echo
 echo "passed: $pass, failed: $fail"

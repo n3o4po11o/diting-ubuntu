@@ -15,11 +15,11 @@ cp -a "$src/." "$bld/"
 write_bootimg_conf "$bld/bootimg.conf"
 
 # AudioReach topology for the loudspeakers, from packages/audio-topology and
-# the linux-msm/audioreach-topology macros at a pinned commit (make sources).
-need m4 alsatplg
+# the linux-msm/audioreach-topology macros at a pinned commit, fetched here
+# if references/ does not have them yet.
+need m4 alsatplg git
+need_ref audioreach-topology "$AUDIOREACH_TOPOLOGY_URL" "$AUDIOREACH_TOPOLOGY_COMMIT"
 ART="$DITING_TOP/references/audioreach-topology"
-[ "$(git -C "$ART" rev-parse HEAD 2>/dev/null)" = "$AUDIOREACH_TOPOLOGY_COMMIT" ] ||
-	die "need $ART at $AUDIOREACH_TOPOLOGY_COMMIT (make sources)"
 mkdir -p "$bld/tplg"
 m4 -I "$ART" -I "$UD/packages/audio-topology" "$UD/packages/audio-topology/XIAOMI-DITING.m4" > "$bld/tplg/XIAOMI-DITING.conf"
 alsatplg -c "$bld/tplg/XIAOMI-DITING.conf" -o "$bld/tplg/XIAOMI-DITING-tplg.bin" 2>"$OUT/logs/tplg.log" ||

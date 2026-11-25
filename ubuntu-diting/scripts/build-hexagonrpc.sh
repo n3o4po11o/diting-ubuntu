@@ -8,10 +8,9 @@
 need dpkg-deb meson ninja gcc git
 
 PKG=hexagonrpcd-diting
+need_ref hexagonrpc "$HEXAGONRPC_URL" "$HEXAGONRPC_COMMIT"
 SRC="$DITING_TOP/references/hexagonrpc"
 PATCHES="$UD/packages/hexagonrpc/patches"
-[ "$(git -C "$SRC" rev-parse HEAD 2>/dev/null)" = "$HEXAGONRPC_COMMIT" ] ||
-	die "need $SRC at $HEXAGONRPC_COMMIT (make sources)"
 cross_args=()
 if [ "$(dpkg --print-architecture)" != arm64 ]; then
 	command -v aarch64-linux-gnu-gcc >/dev/null 2>&1 ||

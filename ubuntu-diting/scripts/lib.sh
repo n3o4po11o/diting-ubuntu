@@ -44,6 +44,37 @@ need() {
 	done
 }
 
+# A source tree under references/, at a pinned commit. `make sources` does
+# not fetch these: each build fetches the one it needs when it gets there
+# (scripts/fetch-sources.sh --help has the whole list). Cloned on first use,
+# blob-less, so that only what is read is downloaded.
+need_ref() { # name url commit: the tree, checked out at the commit
+	local dir="$DITING_TOP/references/$1"
+	ref_clone "$1" "$dir" "$2"
+	if [ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" != "$3" ]; then
+		ref_has_commit "$1" "$dir" "$3"
+		git -C "$dir" checkout -q "$3" || die "references/$1: cannot check out $3"
+	fi
+}
+
+have_ref() { # name url commit: the tree, with the commit in it (built with git archive)
+	local dir="$DITING_TOP/references/$1"
+	ref_clone "$1" "$dir" "$2"
+	ref_has_commit "$1" "$dir" "$3"
+}
+
+ref_clone() { # name dir url
+	if [ ! -d "$2/.git" ]; then
+		log "cloning $1"
+		git clone -q --filter=blob:none "$3" "$2" || die "cannot clone $1 from $3"
+	fi
+}
+
+ref_has_commit() { # name dir commit
+	git -C "$2" cat-file -e "$3^{commit}" 2>/dev/null ||
+		die "references/$1 has no commit $3: it was cloned from somewhere else. Remove it, and it is cloned again when it is needed."
+}
+
 # The CIX P1 build host (edge kernel 7.1.8) corrupts compiler memory under
 # parallel load when transparent huge pages are used: 6/72 vs 0/72 crashing
 # parallel compiles (docs/BUILD.md). Run builds with THP disabled per

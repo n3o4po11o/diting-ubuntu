@@ -18,7 +18,7 @@ linux-diting/
 │   ├── patches/             patch series on top of the signed stable tag
 │   └── config/diting.config config fragment on top of arm64 defconfig
 ├── tools/                   firmware builder, super/lp parser, ACDB/topology, camera, DSP diag, IMS tools
-├── references/              upstream/community trees (make sources; git-ignored)
+├── references/              upstream and community trees, each fetched by the build that needs it (git-ignored)
 ├── device-data/             PRIVATE dumps from the owner's phone (git-ignored, never published)
 └── ubuntu-diting/
     ├── Makefile, config/    diting.conf, kernel.lock, package lists, apt keys
@@ -36,7 +36,7 @@ linux-diting/
 ```sh
 cd linux-diting/ubuntu-diting
 make check-host            # host tools (docs/BUILD.md lists the packages)
-make sources               # clone + signature-check v7.2.10, clone references
+make sources               # clone + signature-check v7.2.10 (the kernel alone)
 make kernel packages       # linux-image-*.deb, device-xiaomi-diting, fastrpc, hexagonrpcd
 make vaapi firmware-setup  # VA-API driver, first-boot firmware extraction (arm64 chroot)
 make release               # public image: rootfs (sudo) + boot images, packed for download

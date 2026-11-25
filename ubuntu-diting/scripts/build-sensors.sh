@@ -14,10 +14,8 @@ if [ "$(uname -m)" != aarch64 ]; then
 		die "arm64 emulation (qemu-user binfmt) not registered; see docs/BUILD.md"
 	warn "building under qemu-user emulation (slower than a native arm64 host)"
 fi
-for r in libssc:$LIBSSC_COMMIT iio-sensor-proxy:$IIO_SENSOR_PROXY_COMMIT; do
-	[ "$(git -C "$DITING_TOP/references/${r%%:*}" rev-parse HEAD 2>/dev/null)" = "${r#*:}" ] ||
-		die "need references/${r%%:*} at ${r#*:} (make sources)"
-done
+need_ref libssc "$LIBSSC_URL" "$LIBSSC_COMMIT"
+need_ref iio-sensor-proxy "$IIO_SENSOR_PROXY_URL" "$IIO_SENSOR_PROXY_COMMIT"
 
 cleanup() {
 	for m in dev/pts dev proc sys; do sudo umount "$CH/$m" 2>/dev/null || true; done

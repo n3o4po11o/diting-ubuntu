@@ -152,7 +152,7 @@ The last column is the reference run.
 | Stage | Target | What it builds | Time |
 | --- | --- | --- | --- |
 | `check-host` | `make check-host` | Host tools present. | < 1 s |
-| `sources` | `make sources` | The signed kernel tag, its signature verified, and the reference trees at their pinned commits. | 10 min |
+| `sources` | `make sources` | The signed kernel tag, its signature verified, and nothing else: each later stage fetches the trees it needs itself. | 1.5 min |
 | `kernel` | `make kernel` | Export, the kernel patches, Image, DTBs, modules, the `linux-image` package. | 49 min |
 | `packages` | `make packages` | `device-xiaomi-diting`, fastrpc, hexagonrpcd. | 41 s |
 | `rootfs` | `make rootfs` | Its prerequisites first (VA-API driver, firmware-setup, mobile-config-firefox, ModemManager, phosh, each in an arm64 build chroot), then the owner rootfs and its image. | 40 min |

@@ -10,9 +10,7 @@ UPSTREAM="$DITING_TOP/references/libva-v4l2-stateful"
 UPSTREAM_COMMIT="$LIBVA_V4L2_COMMIT"
 PKG="$UD/packages/libva-v4l2-stateful"
 
-[ -d "$UPSTREAM/.git" ] || die "missing $UPSTREAM (make sources)"
-git -C "$UPSTREAM" cat-file -e "$UPSTREAM_COMMIT^{commit}" ||
-	die "upstream commit $UPSTREAM_COMMIT not in $UPSTREAM"
+have_ref libva-v4l2-stateful "$LIBVA_V4L2_URL" "$UPSTREAM_COMMIT"
 
 log "preparing source (upstream ${UPSTREAM_COMMIT:0:7} + $(ls "$PKG"/*.patch | wc -l) patch(es))"
 src="$WORK/libva-v4l2-stateful-pkg"

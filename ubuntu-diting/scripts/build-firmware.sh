@@ -4,13 +4,11 @@
 # the same builder that diting-firmware-setup runs on a phone. The resulting
 # .deb is for local use only.
 . "$(dirname "$0")/lib.sh"
-need gcc m4 alsatplg dpkg-deb
+need gcc m4 alsatplg dpkg-deb git
 
+need_ref audioreach-topology "$AUDIOREACH_TOPOLOGY_URL" "$AUDIOREACH_TOPOLOGY_COMMIT"
+need_ref ar-audioreach-graphservices "$AUDIOREACH_GRAPHSERVICES_URL" "$AUDIOREACH_GRAPHSERVICES_COMMIT"
 ART="$DITING_TOP/references/audioreach-topology"
-[ "$(git -C "$ART" rev-parse HEAD 2>/dev/null)" = "$AUDIOREACH_TOPOLOGY_COMMIT" ] ||
-	die "need $ART at $AUDIOREACH_TOPOLOGY_COMMIT (make sources)"
-[ "$(git -C "$DITING_TOP/references/ar-audioreach-graphservices" rev-parse HEAD 2>/dev/null)" = "$AUDIOREACH_GRAPHSERVICES_COMMIT" ] ||
-	die "need references/ar-audioreach-graphservices at $AUDIOREACH_GRAPHSERVICES_COMMIT (make sources)"
 mkdir -p "$OUT/logs" "$OUT/debs"
 bash "$DITING_TOP/tools/acdb/build.sh" "$WORK/acdb" > "$OUT/logs/acdb-query-build.log" 2>&1 ||
 	{ tail -20 "$OUT/logs/acdb-query-build.log"; die "acdb-query build failed"; }
