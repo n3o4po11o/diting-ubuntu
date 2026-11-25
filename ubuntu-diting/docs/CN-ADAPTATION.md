@@ -45,6 +45,7 @@ throttling), worked out 2026-11-21/24. Fixes are commits on the
 | Registration dropping every few minutes, `cs-domain-not-available` | voice-centric UE with CS and PS on a network without a CS domain | `usage="data" service_domain="ps-only"`, `diting-nas-pref` at boot (device 0.7.35) |
 | No data for five minutes after a ModemManager restart with a connection up | the connection ends with the process; the modem treats the call as aborted and throttles PDN calls | `diting-mm-stop` as the stop hook, the watchdog dials right after a start (device 0.7.35) |
 | Calls terminated after 47 s | no CS voice and no IMS | open: VoLTE |
+| USB controller reset every 126 s with no host attached, one reset oopsing the kernel (2026-11-25) | `diting-hardware-recovery` took `usb0` without carrier for a stuck gadget; the Type-C data role contains "device" in both roles, and with nothing or a charger on the cable there is no carrier. A gadget left bound is bound again in the probe of the rebound controller, and that oopsed | reset only when a host has the gadget (UDC state other than "not attached"); gadget down before the reset (device 0.7.36) |
 
 ## Hardware facts (measured, do not re-litigate)
 

@@ -956,30 +956,77 @@ their dial, unprobed until then.
 
 ### diting-hardware-recovery: the USB controller reset every two minutes, one reset oopsed the kernel
 
-Not ModemManager, but the same day on the same phone, and still there
-(OPEN):
+Not ModemManager, but the same day on the same phone. Found at 21:42;
+the fix is device 0.7.36, and what is verified of it is below.
 
-- `check_usb` takes `usb0` without carrier for a stuck gadget whenever
-  the Type-C data role contains "device" (here `host [device]`), and
-  with no cable attached `usb0` has no carrier anyway. The result is
-  `recover_usb`, an unbind and a bind of `dwc3-qcom` and
-  `diting-usb-gadget start`, every 126 s: 15 times in the boot of 21:12
-  from 21:14:53 on, 97 times between 05:41 and 09:47 in the boot before.
+- `check_usb` took `usb0` without carrier for a stuck gadget whenever
+  the Type-C data role contains "device". It does in both roles of this
+  kernel (7.2.10): the current role is the one in brackets, `host
+  [device]` is the device role and `[host] device` the host role. So the
+  check was "usb0 has no carrier", and there is none as a matter of
+  course with nothing on the cable or with a charger: no host ever
+  attaches the gadget. `recover_usb`, an unbind and a bind of `dwc3-qcom`
+  and `diting-usb-gadget start`, ran every 126 s: 15 times in the boot of
+  21:12 from 21:14:53 on, 97 times between 05:41 and 09:47 in the boot
+  before. In the journal back to 2026-11-22 there is no USB reset before
+  those: none is on record that helped.
 - 21:42:16: one of those binds oopsed the kernel: `Unable to handle
   kernel NULL pointer dereference at virtual address 0x10` in
   `usb_ep_alloc_request`, called from `composite_dev_prepare` and
-  `configfs_composite_bind` under `dwc3_qcom_probe`. The endpoint it
-  was given was NULL (x0 in the trace), the one `composite_dev_prepare`
-  takes from the gadget. The oops killed the script (SIGSEGV); systemd
-  started it again at 21:42:26.
+  `configfs_composite_bind` under `dwc3_qcom_probe`: the gadget was
+  still bound and waiting for its controller, and was bound again in the
+  probe of the next one. The endpoint it was given was NULL (x0 in the
+  trace), the one `composite_dev_prepare` takes from the gadget. The
+  oops killed the script (SIGSEGV); systemd started it again at
+  21:42:26.
 - 21:44:26: the next reset began and never logged "recovery done". The
   script (`/bin/sh`, PID 8977) has been in state D since, most likely in
   the write to the driver's `bind` or `unbind`, the only steps of the
   reset that run without a child process. It cannot be stopped, so the
   next shutdown may wait on it.
-- Not touched. The check has to leave the controller alone when no host
-  is attached, and a reset has to take the gadget down before the
-  controller is rebound.
+
+The fix:
+
+- `check_usb` counts `usb0` without carrier as stuck only when a host
+  has the gadget: the UDC it is bound to says so with a state other than
+  "not attached" (`/sys/class/udc/<udc>/state`). With nothing on the
+  cable, with a charger, or in host mode (no UDC), nothing is touched.
+- `recover_usb` takes the gadget down first (`diting-usb-gadget stop`),
+  then unbinds and binds `dwc3-qcom`, then brings the gadget up again;
+  it logs when the gadget is bound to no controller afterwards.
+
+Verified on the phone:
+
+- `check_usb` with a fake tree, eight cases as intended.
+- In the boot with the wedged controller, the new script run by hand for
+  340 s in the state that had produced the resets (no carrier, UDC "not
+  attached", device role): five polls, no reset.
+- The phone was rebooted for the rest (22:49). With the script in state
+  D the shutdown took three minutes longer, two timeouts of 90 s, and
+  went through. With a host on the cable and the gadget taken (UDC
+  "configured", carrier on `usb0`), `recover_usb` run by hand: 7 s, the
+  gadget taken down, the controller unbound and bound, the gadget up and
+  bound again; no oops, nothing left in state D, the watchdog's unit
+  untouched. Seven seconds after it the UDC was still "not attached"; the
+  host had the gadget again within 27 s, with the carrier, and the Mac
+  was answered at 172.16.42.1.
+- Not produced: the watchdog firing on its own. That takes a host that
+  has the gadget without bringing `usb0` up. `ip link set usb0 down` is
+  not that: an interface that is down shows no NO-CARRIER either, and
+  the watchdog left it alone, as it should.
+
+Left as it is: a host that has the gadget but never brings its network
+interface up leaves `usb0` without carrier, and the reset would repeat
+every 126 s, as before the fix. A limit on consecutive resets would stop
+that. And after a reset NetworkManager shows `usb0` disconnected, with
+the gadget script's own 172.16.42.1/24 on it: `recover_usb` starts the
+script without the empty `DITING_USB_ADDR` of its unit. So it was before
+the fix, and the Mac is reached through it all the same.
+
+The phone's package: dpkg has had 0.7.26 since 2026-11-21. The files of
+the later versions were copied onto it by hand, 0.7.36's as well: a deb
+upgrade runs `update-initramfs`, and with it the hook that writes the
+boot images.
 
 ### The phone at the end
 
@@ -990,6 +1037,14 @@ ModemManager left it; nothing left in `/tmp` and `/run` from the trials.
 The cellular connection is the one of 21:58:09, after the second
 recovery, probed as above. The mode and the NAS fields were read again
 at 22:20, after the restart of the firmware: unchanged.
+
+Rebooted again at 22:49, for the USB fix. This time the first dial went
+through: data up 57 s after boot, no throttled line. Registered on 5G,
+the modes and the NAS fields as before, pings bound to `qmapmux0.0`
+answered at 23:01. A host is on the cable: the gadget is configured,
+`usb0` has its carrier, and the Mac reaches the phone at 172.16.42.1.
+The watchdog runs the fixed script; nothing is left in `/tmp` and
+`/run`.
 
 ### The owner's observation
 

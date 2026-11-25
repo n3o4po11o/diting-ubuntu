@@ -6,12 +6,16 @@
 #      "Unable to drain transmitter") after OTG use or long uptime.
 #      Fix: reload hci_uart module.
 #
-#   2. USB gadget: the dwc3 controller sticks in a bad PM state after
-#      an OTG adapter was used and removed ("failed to suspend: -11").
-#      Fix: unbind/rebind dwc3-qcom + reconfigure the gadget.
+#   2. USB gadget: after an OTG adapter was used and removed the dwc3
+#      controller can stick in a bad state ("failed to suspend: -11").
+#      Fix: gadget down, unbind/rebind dwc3-qcom, gadget up again. It is
+#      done only when a host has the gadget and usb0 still has no
+#      carrier: with nothing on the cable, or with a charger, there is
+#      none as a matter of course.
 #
 # Runs once a minute; each check is near-instant when healthy.
 LOG_TAG=diting-hw-recovery
+GADGET=/sys/kernel/config/usb_gadget/diting
 BT_DOWN_COUNT=0
 USB_DOWN_COUNT=0
 
@@ -50,19 +54,28 @@ recover_bt() {
 }
 
 check_usb() {
-	# usb0 exists but NO-CARRIER with the gadget configured
-	if ip link show usb0 2>/dev/null | grep -q "NO-CARRIER"; then
-		# only if we're in device mode (not OTG host)
-		role=$(cat /sys/class/typec/port0/data_role 2>/dev/null)
-		case "$role" in
-		*device*) return 1 ;;
-		esac
-	fi
-	return 0
+	# Stuck is: no carrier although a host has the gadget. Whether one has
+	# is the controller's to say: its UDC is "not attached" until a host
+	# resets the bus. With nothing on the cable, or with a charger (the
+	# port is the UFP then as well), usb0 has no carrier as a matter of
+	# course; taking that for stuck reset the controller every 126 s for
+	# hours (2026-11-25).
+	[ -d "$GADGET" ] || return 0
+	ip link show usb0 2>/dev/null | grep -q "NO-CARRIER" || return 0
+	udc="$(cat "$GADGET/UDC" 2>/dev/null)"
+	case "$(cat "/sys/class/udc/$udc/state" 2>/dev/null)" in
+	''|"not attached") return 0 ;;
+	esac
+	return 1
 }
 
 recover_usb() {
-	logger -t "$LOG_TAG" "usb gadget no carrier, resetting dwc3"
+	logger -t "$LOG_TAG" "usb gadget stuck with a host attached, resetting dwc3"
+	# Take the gadget down first. One left bound waits for its controller
+	# and is bound again while the next one probes: that bind took the
+	# controller into a NULL pointer dereference (kernel oops of
+	# 2026-11-25).
+	/usr/lib/diting/diting-usb-gadget stop
 	local dev=a600000.usb
 	local drv=/sys/bus/platform/drivers/dwc3-qcom
 	echo "$dev" > "$drv/unbind" 2>/dev/null
@@ -70,6 +83,9 @@ recover_usb() {
 	echo "$dev" > "$drv/bind" 2>/dev/null
 	sleep 3
 	/usr/lib/diting/diting-usb-gadget start 2>/dev/null || true
+	if [ -d "$GADGET" ] && [ -z "$(cat "$GADGET/UDC" 2>/dev/null)" ]; then
+		logger -t "$LOG_TAG" "usb gadget is bound to no controller after the reset"
+	fi
 	logger -t "$LOG_TAG" "usb gadget recovery done"
 }
 
