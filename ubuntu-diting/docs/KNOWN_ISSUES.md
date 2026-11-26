@@ -193,8 +193,23 @@ kernel log had nothing new through all of it. Limits:
   960x540 ended with SIGSEGV (exit 139) before the first frame, the other 5
   encoded the same input correctly; the kernel log says nothing. With the
   input padded first (`-vf pad=1280:736` for 720p) every run passes, and the
-  stream then has the padded height. liuqin-linux-kit's ffmpeg patch 0001
-  copies the visible rows only; until it is ported, pad the input.
+  stream then has the padded height. **Read from the coredump that
+  evening**: `avcodec_send_frame()` → the encoder handing the frame to the
+  driver → `memcpy`, faulting on a read at the first byte past the frame's
+  buffer, into a V4L2 buffer of 1280x736 (the mapping of `/dev/video1`).
+  4 of 10 runs that evening crashed, 0 of 6 with the input padded. The
+  driver reporting the aligned size is upstream's own behaviour
+  (`iris_venc_s_fmt()`, the same on the tablet). **The fix is in the
+  tree**: `packages/ffmpeg-diting` carries liuqin-linux-kit's patch 0001
+  (the visible rows only, the chroma after the padded luma); its static
+  build went through 80 of 80 encodes with the input not padded
+  (`ci/FFMPEG.md`). It is not in the rootfs yet, so pad the input for the
+  stock one.
+- **The stock ffmpeg loses the last frames of a stream at times**: 2 to 5
+  of 60 in 7 of 80 runs on 2026-11-26, 2 to 13 of 900 in longer runs,
+  with nothing in the kernel log. Its encoder wrapper gives up at the
+  drain while packets still hold the capture buffers; the kit's patch 0003
+  (in `packages/ffmpeg-diting`) is for that - 0 of 80 there.
 - No forced keyframes: the driver offers no control for it (upstream 7.3
   has one).
 - The HEVC level is not constrained by the driver (H.264's is, by 0128).
@@ -304,6 +319,97 @@ at a time:
   at that load. `iris_check_core_mbps()` exists for the load and is not
   called by the admission check.
 
+The first and the last of these are gone since (0133, 0134), and the
+recovery path had a hole that this load showed: the next entry.
+
+### Sessions the firmware serves, and the hole the recovery had: 0130–0135 (2026-11-26)
+
+On the phone since 2026-11-26 23:05 as the module alone
+(`updates/qcom-iris.ko`, `13c30150b3afe8f5…`): the kernel image, its
+configuration and the DTB are those of 0119–0129, byte for byte. What
+changed, with what was read before and after:
+
+- **Admission by frame size (0134).** The driver's limit was the vendor's
+  MAX_MBPF (276480 macroblocks a frame: eight sessions of 4K), and
+  decoders start with a frame rate the load check cannot see, so every
+  session was admitted. Read with VA-API decoders on the kernel before:
+  four sessions of 4K decode to their end; the fifth, and more, ended in
+  the firmware's fatal system error in nine of nine runs, whatever the
+  pacing, the spacing or the stream (intra-only, P-frames); of the mixes
+  just above the figure, one of four passed. The limit is now what passed,
+  130560 macroblocks a frame. Read since, three times: the fifth decoder
+  of 4K is refused at once (`current session not supported(-12)`; ffmpeg
+  decodes that one in software) and the four others are not disturbed.
+- **The session count at open() (0130, upstream `397ebadcbc`; 0131,
+  local, frees the controls of the instance that is refused).** Sixteen
+  sessions, as the firmware has: the 17th `open()` fails with `EBUSY`, in
+  0 ms. One process opening `/dev/video0` twenty times gets sixteen;
+  after an overload the node opens again the same way.
+- **The queues of an instance in error (0133, local).** The two videobuf2
+  warnings above are gone: a buffer that arrives at an instance in the
+  error state comes back as queued, as `start_streaming()` hands back the
+  rest, and the session takes a buffer before it puts it on the ready
+  queue. The queues are not marked in error on purpose (see the reset
+  below): a process with buffers queued learns of the error when it
+  closes the session. Read: fifteen 1080p decoders at once, when they end
+  in the firmware's error, are all gone in 2–6 s without a signal, no D
+  state, no warning line, and the next decode is correct.
+- **0132 (upstream `4524809316`)** cancels the system-error work when the
+  driver is removed. Not exercised: the module is not removed on this
+  phone.
+- **The hole in the recovery (0135, local).** `iris_core_init()` returns
+  `-EINVAL` when the core is in `IRIS_CORE_ERROR`, and went on to the
+  label that writes `IRIS_CORE_DEINIT` - over a core that is still
+  powered on, with its IRQ enabled and its firmware loaded. The worker
+  that recovers the core starts with `iris_core_deinit()`, which powers
+  off unless the state is `IRIS_CORE_DEINIT`. So one `open()` in the
+  window between the firmware's error and that worker (10 ms and more)
+  made it skip the power-off, and the `iris_core_init()` that followed
+  powered on a core that was on. Upstream has it to this day (7.2.10 and
+  master of 2026-11-16 read the same). Now the state is left as it is:
+  the `open()` gets its `-EINVAL` and the worker powers the core off
+  first. Where nothing had scheduled the worker (the firmware answering
+  the system init with an error, or not within a second), the refused
+  `open()` schedules it.
+
+**The reset, and what it was.** A first build of this batch marked the
+queues of an instance in error as well (`vb2_queue_error()` from
+`iris_inst_change_state()`). With it, seventeen 1080p decoders started
+half a second apart followed by twenty opens **reset the SoC twice**
+(21:33, and the replay with the kernel log captured live). The log of the
+replay, against the code: the firmware's system error at 422.30 s; the
+recovery; a second system error 105 ms after the first; 8 ms later the
+`core init failed` of an `open()` - refused, and on that path the state
+written to `IRIS_CORE_DEINIT` while the core was on; the next run of the
+worker, 9.6 ms after that line, `Unbalanced enable for IRQ 219` from
+`iris_vpu_power_on()`: the power-off's `disable_irq()` had not run. The
+firmware watchdog fired 2.2 s later, and the twenty opens that followed
+reset the SoC. The `Unbalanced enable for IRQ 218` from `iris_open()`
+read the same morning fits the same path. The marking itself did no
+harm: it only made an `open()` in that window more likely. The phone was
+put back on the module of 0119–0129 in between, then on this batch
+without the marking (22:04), which has the hole as well: the same
+sequence then ran three times without reaching the window, as it had
+twice with the marking. With 0135 the window was forced: an
+`open()` and `close()` every 2 ms on the decoder node around the same
+overload, three rounds, 27 to 29 thousand opens each; 53 to 75 per round
+fell in the window and were refused (196 `core init failed` in the log),
+and there was no `Unbalanced enable`, no watchdog and no reset; the
+decode after each round was correct.
+
+What the overload still leaves, with 0130–0135:
+
+- Fifteen to seventeen sessions of 1080p are above what the firmware
+  serves at times, and a limit on the frame size cannot tell them apart:
+  sixteen started together failed twice of twice, fifteen failed in three
+  of four runs, seventeen started half a second apart failed in three of
+  six, while thirteen, fourteen and sixteen started a second apart
+  passed. They end in the firmware's error (`0x5000003`), each time with
+  one SMMU context fault from the video core (`SID=0x2184`), and while
+  the sessions still submit, the driver recovers about once a second (up
+  to eleven `received system error` lines in four seconds), until they
+  are gone. Nothing stays in the kernel.
+
 ### The video decoder on a cold start: frames differ, and a reset after a reload by hand (2026-11-26, ON HOLD)
 
 **On hold by the owner's decision**: video decoding stays as it is until the
@@ -366,6 +472,33 @@ touch the battery code (`qcom_battmgr.ko` is the one of batch 1). The
 property read 5.23 V an hour later. Most likely a read that reached the
 driver before the ADSP's battery manager answered. Seen once: watched, not
 chased.
+
+### One boot with the greeter's user manager stopping past its timeout (2026-11-26 22:04; seen once as failed)
+
+`user@100.service`, the user manager of greetd's greeter (`_greetd`),
+failed with `Result: timeout` 44 s into the boot: its stop was held by
+`obex.service` ("User job obex.service/stop running"), and systemd killed
+the manager. The desktop session was not affected; `systemctl
+is-system-running` said `degraded` until the next boot. In the two boots
+before, the same manager logged `xdg-document-portal.service: Failed to
+kill control group` and stopped all the same. The video driver is not in
+it: the boot after, on the module with 0135, came up `running`. Watched.
+
+### Memory: 1.6 GiB of the 12 GB is reserved before Linux counts (2026-11-26; 628 MiB of it optional)
+
+`MemTotal` is 10,614,296 kB on the 12 GB phone. 12,301,312 kB reach the
+kernel (about 275 MiB are held before that), and 1.63 GiB is reserved at
+boot: the device tree's reserved-memory, about 1.36 GiB (the modem 306
+MiB, other firmware about 250 MiB, two regions for virtual machines about
+155 MiB, `splash_mem` 43 MiB, and three that upstream's `sm8450.dtsi` has
+and the stock device trees of this phone do not: `mte_mem` 512 MiB,
+`trusted_apps_mem` 57 MiB, `trusted_apps_ext_mem` 59 MiB - 628 MiB), CMA
+44 MiB, swiotlb 64 MiB, the kernel about 170 MiB. Upstream removed the
+three in 7.3.x ("not present on downstream device trees and only take
+memory away from the AP"). `kernel/patches-experimental/0136-…` does the
+same on 7.2.10; `release/driver-fix-batch5/optional-0136-reserved-memory/`
+has a `vendor_boot.img` with it, built and **not flashed**: it is a write
+to `vendor_boot_a`, so it waits for the owner.
 
 ### Char-device use-after-free at boot (oops in `kobj_lookup`)
 
