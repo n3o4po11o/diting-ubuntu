@@ -76,7 +76,13 @@ in `docs/BRINGUP_STATUS.md`.
   status) wake it every now and then (ftrace: ipcc/glink-smem as the first
   interrupt after resume); in 60 s RTC tests it slept the full period in about
   half of the cycles. ModemManager does not ask the modem to suppress them
-  while the screen is off (Android does).
+  while the screen is off (Android does). None of this is on the phone's
+  normal path: it does not auto-suspend by design
+  (`diting-always-online.service`, `docs/ALWAYS-ONLINE.md`), and the owner
+  confirmed on 2026-11-26 that that is intended. One manual deep suspend
+  that day, on USB charge, with the three `qcom-battmgr` supplies no longer
+  wakeup sources: 25.05 s of sleep, ended by something other than the RTC
+  alarm set for 60 s. The waker was not looked for.
 - **Phone stayed awake after a wake-up from sleep** (fixed in device package
   0.7.15, kernel r45): the ADSP charger firmware sends a Xiaomi status
   message (opcode 0x50) every 480 s, and it ends deep sleep (5 of 5 traced
