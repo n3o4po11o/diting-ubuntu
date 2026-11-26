@@ -1,0 +1,19 @@
+#!/bin/sh
+# diting-ffmpeg-entrypoint, run as root when the FFmpeg container starts
+# (ci/Dockerfile.ffmpeg): what diting-kernel-entrypoint does - a name and a
+# home for the uid that owns the checkout, so that git and tmux behave as
+# usual under `docker exec -u` - and sudo without a password for that user.
+# scripts/build-ffmpeg.sh creates and enters the arm64 buildd chroot with
+# sudo (lib-buildd.sh), which is also why ci/ffmpeg.sh starts the container
+# privileged.
+set -eu
+
+/usr/local/sbin/diting-kernel-entrypoint true
+
+uid="${HOST_UID:-1000}"
+user="$(getent passwd "$uid" | cut -d: -f1)"
+[ -n "$user" ] || { echo "diting-ffmpeg-entrypoint: no user for uid $uid" >&2; exit 1; }
+printf '%s ALL=(ALL) NOPASSWD:ALL\n' "$user" >/etc/sudoers.d/diting-builder
+chmod 440 /etc/sudoers.d/diting-builder
+
+exec "$@"

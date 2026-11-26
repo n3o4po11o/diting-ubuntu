@@ -1,11 +1,25 @@
-# FFmpeg build image for ubuntu-diting: what builds the static ffmpeg and
-# ffprobe of packages/ffmpeg-diting, and nothing else, so that a host needs
-# nothing but docker for it - the phone itself, where the binaries are tried
-# and whose system stays as it is. ci/FFMPEG.md has the commands.
+# FFmpeg build image for ubuntu-diting: the host tools of `make ffmpeg` and
+# nothing else, so that a host needs nothing but docker for it - the phone
+# itself, whose system stays as it is. ci/FFMPEG.md has the commands.
 #
 #   docker build -t diting-ffmpeg:$REV -f ubuntu-diting/ci/Dockerfile.ffmpeg ubuntu-diting/ci
 #   ubuntu-diting/ci/ffmpeg.sh shell          # a bash in the container, the checkout at /src
 #   ubuntu-diting/ci/ffmpeg.sh make ffmpeg    # a Makefile target, in tmux inside the container
+#
+# FFmpeg itself is not compiled in this image. scripts/build-ffmpeg.sh
+# builds it in the arm64 buildd chroot of the Ubuntu suite the rootfs uses
+# (lib-buildd.sh, as the VA-API driver and the other local packages are),
+# with the packages of config/packages-ffmpeg.list from the Ubuntu archive:
+# the binaries have to be linked against the libraries and the glibc of the
+# release they will run on. What this image has to have for that: make for the
+# Makefile, git and gpg for the signed release tag, patch for the series,
+# debootstrap and the Ubuntu keyring for the chroot; sudo, because the
+# scripts call it (the
+# entry point lets the user that owns the checkout do so without a
+# password, and ci/ffmpeg.sh starts the container privileged: a chroot with
+# /proc, /sys and /dev bound in needs that); tmux, for what ci/ffmpeg.sh
+# `make` runs in. On other architectures the arm64 chroot runs under
+# qemu-user, whose binfmt entry has to be registered on the host.
 #
 # The base image is the one of ci/Dockerfile (the from-zero builder) and
 # ci/Dockerfile.kernel, pinned by digest. /usr/share/diting-ffmpeg-packages.tsv
@@ -15,19 +29,14 @@ FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f0
 ARG DEBIAN_FRONTEND=noninteractive
 ARG VCS_REF=unknown
 
-# What scripts/build-ffmpeg.sh and the fetch before it need: the compiler,
-# git and gpg for the signed release tag, patch for the series, file to tell
-# a static binary from a dynamic one; sudo because the scripts call it (as
-# root it asks for nothing); tmux, for what ci/ffmpeg.sh `make` runs in.
-# libdrm-dev with pkg-config is the one library linked in: FFmpeg has no DRM
-# device context without it, and the ffmpeg command line needs that context
-# for the DRM PRIME frames the decoder patches export (-hwaccel drm).
 RUN apt-get update && apt-get install -y --no-install-recommends \
 		ca-certificates sudo tzdata \
-		git gnupg patch \
-		build-essential file \
-		libdrm-dev pkg-config \
+		make git gnupg patch \
+		debootstrap ubuntu-keyring rsync \
 		tmux less vim-tiny \
+	&& if [ "$(dpkg --print-architecture)" != arm64 ]; then \
+		apt-get install -y --no-install-recommends qemu-user-static binfmt-support; \
+	fi \
 	&& rm -rf /var/lib/apt/lists/* \
 # The checkout is bind-mounted from the host and owned by another user.
 	&& git config --system --add safe.directory '*'
@@ -38,14 +47,16 @@ RUN dpkg-query -W -f='${Package}\t${Version}\n' > /usr/share/diting-ffmpeg-packa
 # The two scripts of the kernel image that are about the container, not the
 # kernel: diting-kernel-entrypoint gives the uid that owns the checkout a
 # name and a home, so that git and tmux behave as usual for `docker exec -u`;
-# diting-kernel-make is what `make` runs inside tmux.
-COPY diting-kernel-entrypoint diting-kernel-make /usr/local/sbin/
-RUN chmod 755 /usr/local/sbin/diting-kernel-entrypoint /usr/local/sbin/diting-kernel-make
+# diting-kernel-make is what `make` runs inside tmux. diting-ffmpeg-entrypoint
+# is the first of those and sudo without a password for that user.
+COPY diting-kernel-entrypoint diting-kernel-make diting-ffmpeg-entrypoint /usr/local/sbin/
+RUN chmod 755 /usr/local/sbin/diting-kernel-entrypoint /usr/local/sbin/diting-kernel-make \
+	/usr/local/sbin/diting-ffmpeg-entrypoint
 
 LABEL org.opencontainers.image.title="diting-ffmpeg" \
-	org.opencontainers.image.description="FFmpeg build environment for ubuntu-diting (Debian 13, ci/FFMPEG.md)" \
+	org.opencontainers.image.description="FFmpeg build environment for ubuntu-diting (Debian 13 host tools; the build is in the Ubuntu chroot, ci/FFMPEG.md)" \
 	org.opencontainers.image.revision="${VCS_REF}"
 
 WORKDIR /src/ubuntu-diting
-ENTRYPOINT ["/usr/local/sbin/diting-kernel-entrypoint"]
+ENTRYPOINT ["/usr/local/sbin/diting-ffmpeg-entrypoint"]
 CMD ["sleep", "infinity"]

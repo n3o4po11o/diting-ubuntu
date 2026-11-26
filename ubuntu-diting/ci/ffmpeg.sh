@@ -1,9 +1,11 @@
 #!/bin/bash
 # The FFmpeg development container of ubuntu-diting: ci/Dockerfile.ffmpeg is
-# the image, the toolchain of `make ffmpeg` and nothing more; this drives it.
-# On the build server as ci/kernel.sh does the kernel, and on the phone
-# itself, where the static binaries are tried: the phone runs docker, the
-# container compiles, and nothing is installed on the phone's system.
+# the image, the host tools of `make ffmpeg` and nothing more; this drives
+# it. On the build server as ci/kernel.sh does the kernel, and on the phone
+# itself, where the binaries are tried: the phone runs docker, the
+# container builds - in the Ubuntu build chroot that the script makes inside
+# it - and nothing is installed on the phone's system. The container is
+# privileged: that chroot binds /proc, /sys and /dev into itself.
 # ci/FFMPEG.md has the details.
 #
 #   ci/ffmpeg.sh build                  build the image for this checkout
@@ -65,7 +67,8 @@ cmd_up() {
 		return
 	fi
 	docker rm -f "$NAME" >/dev/null 2>&1 || true
-	docker run -d --name "$NAME" --network=host \
+	# privileged: the build chroot binds /proc, /sys and /dev into itself
+	docker run -d --name "$NAME" --network=host --privileged \
 		-e "HOST_UID=$(id -u)" -e "HOST_GID=$(id -g)" -v "$TOP:/src" "$(image)"
 }
 

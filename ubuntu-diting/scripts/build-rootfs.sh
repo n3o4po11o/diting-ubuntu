@@ -171,6 +171,31 @@ fi
 	in_root sh -c 'apt-get -y install --allow-downgrades --no-install-recommends /tmp/debs/modemmanager_*diting*_arm64.deb /tmp/debs/libmm-glib0_*diting*_arm64.deb'
 rm -rf "$ROOT/tmp/debs"
 
+# The ffmpeg and ffprobe of `make ffmpeg` (FFmpeg n9.1 with the V4L2
+# patches of packages/ffmpeg-diting), built in the Ubuntu build chroot
+# against this release's libraries. Those the binaries need are installed
+# first - the list is what `make ffmpeg` read off them with ldd - then the
+# two files go into /usr/local/bin, which is ahead of /usr/bin on every
+# PATH: they are what "ffmpeg" and "ffprobe" run. The archive's ffmpeg
+# stays installed for what links its libraries (Firefox, GStreamer's libav
+# plugin, ...). Not a package: dpkg does not know these two files.
+FFMPEG_BIN=("$OUT/ffmpeg/ffmpeg" "$OUT/ffmpeg/ffprobe")
+for f in "${FFMPEG_BIN[@]}" "$OUT/ffmpeg/runtime-packages.txt"; do [ -f "$f" ] || die "missing $f; run 'make ffmpeg' first"; done
+log "the libraries the ffmpeg needs, and the ffmpeg and ffprobe in /usr/local/bin"
+mapfile -t FFMPEG_RUNTIME < <(grep -v '^\s*$' "$OUT/ffmpeg/runtime-packages.txt")
+in_root apt-get -y install --no-install-recommends "${FFMPEG_RUNTIME[@]}"
+install -d -m 755 "$ROOT/usr/local/bin"
+install -m 755 "${FFMPEG_BIN[@]}" "$ROOT/usr/local/bin/"
+# Run once where they will run: a library that is missing shows here. The
+# output is read into a variable, not piped on: with pipefail a head that
+# closes early would count as a failure.
+ff_version="$(in_root /usr/local/bin/ffmpeg -version 2>/dev/null | sed -n 1p)" ||
+	die "the ffmpeg does not run in the rootfs: a library it needs is missing"
+[ -n "$ff_version" ] || die "the ffmpeg prints no version in the rootfs: a library it needs is missing"
+echo "   $ff_version"
+in_root /usr/local/bin/ffprobe -version >/dev/null 2>&1 ||
+	die "the ffprobe does not run in the rootfs: a library it needs is missing"
+
 # Optional desktop stage (needs display/touch; GPU-less software rendering
 # is configured by device-xiaomi-diting).
 case "${ROOTFS_DESKTOP:-}" in
@@ -305,6 +330,7 @@ UBUNTU_SUITE=$UBUNTU_SUITE
 KERNEL_RELEASE=$KERNEL_RELEASE
 KERNEL_COMMIT=$KERNEL_COMMIT
 PATCHES_DIGEST=$(patches_digest)
+FFMPEG=$FFMPEG_TAG ($FFMPEG_COMMIT), in /usr/local/bin
 STATUS=UNTESTED ON DEVICE
 B
 

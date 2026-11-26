@@ -202,9 +202,10 @@ kernel log had nothing new through all of it. Limits:
   (`iris_venc_s_fmt()`, the same on the tablet). **The fix is in the
   tree**: `packages/ffmpeg-diting` carries liuqin-linux-kit's patch 0001
   (the visible rows only, the chroma after the padded luma); its static
-  build went through 80 of 80 encodes with the input not padded
-  (`ci/FFMPEG.md`). It is not in the rootfs yet, so pad the input for the
-  stock one.
+  build, on 2026-11-26 still a small static one, went through 80 of 80
+  encodes with the input not padded (`ci/FFMPEG.md`). Rootfs images built from 2026-11-27 on have it in
+  `/usr/local/bin`, ahead of the archive's on every PATH; until such an
+  image is flashed, pad the input for the stock one.
 - **The stock ffmpeg loses the last frames of a stream at times**: 2 to 5
   of 60 in 7 of 80 runs on 2026-11-26, 2 to 13 of 900 in longer runs,
   with nothing in the kernel log. Its encoder wrapper gives up at the

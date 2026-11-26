@@ -41,6 +41,7 @@ make check-host            # host tools (docs/BUILD.md lists the packages)
 make sources               # clone + signature-check v7.2.10 (the kernel alone)
 make kernel packages       # linux-image-*.deb, device-xiaomi-diting, fastrpc, hexagonrpcd
 make vaapi firmware-setup  # VA-API driver, first-boot firmware extraction (arm64 chroot)
+make ffmpeg               # ffmpeg + ffprobe for /usr/local/bin of the rootfs (ci/FFMPEG.md)
 make release               # public image: rootfs (sudo) + boot images, packed for download
 ```
 
@@ -54,7 +55,10 @@ built it, a password-less account with the build user's SSH key.
 
 `make owner-release` makes the owner image to flash: the rootfs built again
 after `make sensors libcamera phoc`, so with every local package, and
-`output/owner/` (boot.img, vendor_boot.img, sparse rootfs.img). The account
+`output/owner/` (boot.img, vendor_boot.img, sparse rootfs.img). Every rootfs
+of this tree also has its own ffmpeg and ffprobe in `/usr/local/bin`
+(`make ffmpeg`, `ci/FFMPEG.md`): ahead of the archive's ffmpeg on every
+PATH, so they are what `ffmpeg` runs there. The account
 has no password and SSH accepts keys only, so the image needs a key before
 it can be logged in to: the build user's (`ROOTFS_SSH_PUBKEYS`) when there
 is one, else `release/add-ssh-key.sh` puts one in. That is a local step on
@@ -93,6 +97,7 @@ No build target changes the locked version.
 ## Verify without the phone
 
 `make verify` checks the kernel release string, DTB, deb contents, the rootfs
-(`os-release`, arm64 dpkg, systemd, signed sources, no Alpine/OpenRC, initramfs) and
-compares the boot images field by field with the stock images. Passing it says
+(`os-release`, arm64 dpkg, systemd, signed sources, no Alpine/OpenRC, initramfs,
+the ffmpeg in `/usr/local/bin`) and compares the boot images field by
+field with the stock images. Passing it says
 nothing about whether the phone boots.

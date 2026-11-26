@@ -35,7 +35,8 @@ the end.
   (reference trees), ports.ubuntu.com, packages.mozilla.org and the snap
   store. `--network=host` gives the container the host's resolver.
 - **Disk.** About 65 GB for one run (source clones 6.5 GB, `work/` 41 GB,
-  `output/` 15 GB) plus 3.8 GB for the packed artifacts. The owner image
+  `output/` 15 GB) plus 3.8 GB for the packed artifacts; the packages of
+  the ffmpeg build add about 1 GB to `work/`. The owner image
   (`owner-release`, added after the reference run) should cost about what the
   public `rootfs.img` costs in both places, 4.5 GB and 1.8 GB; not measured
   yet.
@@ -155,7 +156,7 @@ The last column is the reference run.
 | `sources` | `make sources` | The signed kernel tag, its signature verified, and nothing else: each later stage fetches the trees it needs itself. | 1.5 min |
 | `kernel` | `make kernel` | Export, the kernel patches, Image, DTBs, modules, the `linux-image` package. | 49 min |
 | `packages` | `make packages` | `device-xiaomi-diting`, fastrpc, hexagonrpcd. | 41 s |
-| `rootfs` | `make rootfs` | Its prerequisites first (VA-API driver, firmware-setup, mobile-config-firefox, ModemManager, phosh, each in an arm64 build chroot), then the owner rootfs and its image. | 40 min |
+| `rootfs` | `make rootfs` | Its prerequisites first (VA-API driver, firmware-setup, mobile-config-firefox, ModemManager, phosh, each in an arm64 build chroot; and since 2026-11-27 the ffmpeg in the same chroot, `ci/FFMPEG.md`), then the owner rootfs and its image, with the ffmpeg and ffprobe in `/usr/local/bin` and the libraries they need. | 40 min |
 | `sensors` | `make sensors` | libssc and iio-sensor-proxy with SSC support. | 3 min |
 | `libcamera` | `make libcamera` | Ubuntu's libcamera with the diting patches. | 14 min |
 | `phoc` | `make phoc` | Ubuntu's phoc with the diting patch. | 4 min |

@@ -46,7 +46,7 @@ packages:
 ## vaapi                libva-v4l2-stateful (VA-API driver for the iris decoder; arm64 buildd chroot)
 vaapi:
 	$(S)/build-libva-v4l2-stateful.sh
-## ffmpeg              static ffmpeg + ffprobe with the V4L2 patches (ci/FFMPEG.md; ci/ffmpeg.sh, on the phone too)
+## ffmpeg              ffmpeg + ffprobe with the V4L2 patches, for /usr/local/bin of the rootfs (ci/FFMPEG.md)
 ffmpeg:
 	$(S)/fetch-sources.sh --ffmpeg
 	$(S)/build-ffmpeg.sh
@@ -75,7 +75,7 @@ libcamera:
 phoc:
 	$(S)/build-phoc.sh
 ## rootfs               Ubuntu rootfs + ext4 image (needs root, uses sudo; ROOTFS_PROFILE=owner|public)
-rootfs: kernel packages vaapi firmware-setup mobile-config-firefox modemmanager phosh
+rootfs: kernel packages vaapi ffmpeg firmware-setup mobile-config-firefox modemmanager phosh
 	$(SUDO) $(S)/build-rootfs.sh
 ## initramfs            regenerate the initramfs inside the rootfs (initramfs-tools)
 initramfs:

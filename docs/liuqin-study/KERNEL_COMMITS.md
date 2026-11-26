@@ -792,5 +792,6 @@ VMID 11；核心的复位和掉电要按原厂驱动的顺序来。diting 的设
 
 **用户态**：kit 的 7 个 FFmpeg 补丁迁到了 n9.1（`ubuntu-diting/packages/ffmpeg-diting`，
 `git am -3` 无冲突），手机上在 docker 镜像里编出静态二进制，验收七项全过
-（`ubuntu-diting/ci/FFMPEG.md`）。还没并入 rootfs：9.1 的库 soname 与归档里的 8.0.1 不同，是并排装
-9.1 还是做 8.0.3 的包替换归档的，等机主定。
+（`ubuntu-diting/ci/FFMPEG.md`）。并入 rootfs 的方式（机主 2026-11-27 定）：二进制装进镜像的
+`/usr/local/bin/`，动态链接 Ubuntu 26.04 的库，不动归档的 ffmpeg；常见的外部库（https、libx264 等）都要，
+硬件只留 V4L2 这几路。

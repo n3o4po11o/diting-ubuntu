@@ -80,9 +80,11 @@ ref_has_commit() { # name dir commit
 # parallel compiles (docs/BUILD.md). Run builds with THP disabled per
 # process via prctl; this does not change any host setting. (Linux only: on
 # another system nothing is compiled, and the scripts that do not build - the
-# fetches, packages/ffmpeg-diting/rebase.sh - run as they are.)
+# fetches, packages/ffmpeg-diting/rebase.sh - run as they are. Nor without a
+# compiler on this side: the container of ci/ffmpeg.sh has none, its build
+# is in a chroot of another release.)
 NOTHP=""
-if [ "${DITING_NOTHP:-1}" = 1 ] && [ "$(uname -s)" = Linux ]; then
+if [ "${DITING_NOTHP:-1}" = 1 ] && [ "$(uname -s)" = Linux ] && command -v cc >/dev/null 2>&1; then
 	NOTHP="$WORK/tools/nothp-$(uname -m)"
 	if [ ! -x "$NOTHP" ] || [ "$DITING_TOP/tools/src/nothp.c" -nt "$NOTHP" ]; then
 		mkdir -p "$WORK/tools"

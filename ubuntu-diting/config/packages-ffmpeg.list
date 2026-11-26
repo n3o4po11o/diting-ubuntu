@@ -1,0 +1,29 @@
+# What the arm64 buildd chroot of the Ubuntu suite needs for the ffmpeg
+# and ffprobe (scripts/build-ffmpeg.sh; lib-buildd.sh makes the
+# chroot). One package per line where there is a comment, several on a line
+# where the comment covers them; "#" starts a comment.
+#
+# Every library here is named in the `options` of scripts/build-ffmpeg.sh:
+# FFmpeg is configured with --disable-autodetect, so a package that is
+# installed but not enabled changes nothing, and an enabled option without
+# its package stops the configure. The hardware video codecs are the V4L2
+# M2M ones of the iris video core, built into FFmpeg; libdrm is for the DRM
+# device context their decoder patches export frames through. There is no
+# other hardware acceleration in the build, on purpose.
+build-essential pkg-config file
+# threads and TLS come from glibc and libssl: https, and SRT on TLS
+libssl-dev libsrt-openssl-dev
+# video: H.264, HEVC, VP8 and VP9, AV1 (libaom, SVT-AV1 and rav1e to encode,
+# dav1d to decode), JPEG 2000, Theora, XviD
+libx264-dev libx265-dev libvpx-dev libaom-dev libsvtav1enc-dev librav1e-dev libdav1d-dev
+libopenjp2-7-dev libtheora-dev libxvidcore-dev
+# still images: WebP, JPEG XL
+libwebp-dev libjxl-dev
+# audio: Vorbis, Opus, MP3, the SoX resampler, AMR narrowband and wideband
+libvorbis-dev libopus-dev libmp3lame-dev libsoxr-dev libopencore-amrnb-dev libopencore-amrwb-dev
+# subtitles and text: libass; drawtext with fontconfig, FriBidi and HarfBuzz
+libass-dev libfreetype-dev libfontconfig-dev libfribidi-dev libharfbuzz-dev
+# filters: time stretching, stabilisation, the colour space conversion of zscale
+librubberband-dev libvidstab-dev libzimg-dev
+# compression, and the DRM device context
+zlib1g-dev libbz2-dev liblzma-dev libdrm-dev

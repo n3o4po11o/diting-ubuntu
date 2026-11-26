@@ -3,7 +3,8 @@
 The owner image is Ubuntu for the owner's own phone: every local package,
 the boot images made inside its own rootfs (`diting.debug=usb` on the kernel
 command line, as in every owner build), the account `ubuntu` locked, `sudo`
-without a password. `make owner-release` builds it, and the build workflow
+without a password, and the tree's own ffmpeg and ffprobe in
+`/usr/local/bin` (`ci/FFMPEG.md`). `make owner-release` builds it, and the build workflow
 (`.github/workflows/build.yml`) builds it on every run and uploads it as the
 artifact `diting-<rev>-owner`.
 

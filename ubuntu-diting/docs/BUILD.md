@@ -23,7 +23,7 @@ Debian/Ubuntu host packages:
 ```sh
 sudo apt install git gnupg2 make gcc bc flex bison perl python3 python3-venv \
   libssl-dev libelf-dev libdw-dev device-tree-compiler mkbootimg rsync curl \
-  dpkg-dev debhelper fakeroot lintian debootstrap ubuntu-keyring \
+  dpkg-dev debhelper fakeroot lintian debootstrap ubuntu-keyring sudo \
   e2fsprogs zstd lz4 cpio kmod xz-utils shellcheck yamllint adb fastboot
 # x86_64 hosts additionally: gcc-aarch64-linux-gnu qemu-user-static binfmt-support
 python3 -m venv ../tools/venv && ../tools/venv/bin/pip install dtschema   # for make dtbs-check
@@ -64,6 +64,13 @@ buildd chroot (`work/build-chroot-<suite>-arm64`, created with
 `debootstrap --variant=buildd`, main/universe enabled), which runs under
 qemu-user via binfmt on x86_64 (registered by `qemu-linux-user`; the `F`
 flag makes the interpreter usable inside the chroot) and natively on arm64.
+
+`build-ffmpeg.sh` builds in that chroot too: the ffmpeg and ffprobe that
+`build-rootfs.sh` puts in `/usr/local/bin` of the rootfs, with the packages
+of `config/packages-ffmpeg.list` (`ci/FFMPEG.md`). That is the point of
+building it there: the binaries are linked against the libraries and the
+glibc of the release the rootfs is built from, and `build-rootfs.sh`
+installs the ones they need.
 
 Not yet ported to x86_64: the scripts that build in a copy of the rootfs
 (`build-libcamera.sh`, `build-sensors.sh`, `build-phoc.sh`) still require a
