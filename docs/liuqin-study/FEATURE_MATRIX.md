@@ -26,6 +26,7 @@
 | 15 | 扬声器 | 4 × CS35L41 / AudioReach（✅） | 2 × CS35L41 | ✅ 文档 | 硬件数量不同；我们带保护固件和出厂校准（T22/T23） |
 | 16 | 内置麦克风 | WCD938x / SoundWire，单声道（✅） | WCD938x，两个模拟麦克风 | ✅ 文档 | 我们多一路（T16） |
 | 17 | H.264 硬解 | Iris2 / V4L2（✅） | iris | ✅ 实测 | 我们另有 HEVC（含 10-bit）和 VP9；对方没有浏览器硬解。详见 VIDEO_DECODE.md |
+| 17a | 硬件视频编码 | liuqin-linux-kit：iris 编码器，H.264 / HEVC（✅） | 同一块 Iris2 | ✅ 实测（2026-11-26 起） | 原先两边都没有。对方的 `liuqin-linux-kit` 做通了，我们照它移植成 0119–0129（driver-fix）：ffmpeg 的 `h264_v4l2m2m` / `hevc_v4l2m2m`，720p–4K。原版 ffmpeg 在高度不是 32 的倍数时会随机崩溃（KNOWN_ISSUES）。详见 KERNEL_COMMITS.md §8 |
 | 18 | 后置摄像头 | S5KJN1 / CAMSS / 软件 ISP（🟡 无自动对焦） | 超广角 S5K4H7 + 主摄 S5KHM6 | ✅ / 🟡 | 软件ISP；有自动对焦和调谐文件（T28–T34、r53）。实测 libcamera 0.7.0 列出两个摄像头 |
 | 19 | 加速度计 / 自动旋转 | SLPI / SSC / iio-sensor-proxy（✅） | SLPI（lsm6dso 等） | ✅ 文档 | 我们另有陀螺仪、磁力计、环境光、距离传感器（T26） |
 | 20 | 电源键 / 音量键 | PMIC / GPIO（✅） | 同 | ✅ 实测 | `pmic_pwrkey`、`pmic_resin`、`gpio-keys` |
@@ -36,9 +37,10 @@
 | 25 | 待机 | s2idle（🟡 未优化） | 同 | 🟡 | 我们 s2idle 和 deep（PSCI）都能进出（T12/T15）；共同的问题是 SoC 级电源域不塌缩 |
 
 对方写“暂不支持”而我们已经有的：RTC（补丁 0028）、陀螺仪 / 磁力计 / 环境光、其他格式硬解、
-浏览器硬解、deep suspend、蜂窝网络与通话。两边都没有的：硬件视频编码、前置摄像头、休眠到磁盘
-（我们有 `disk` 状态但没测过）。对方有而我们没有的：指纹、快充认证、关机充电、DP 输出、USB3、
-GNOME 桌面与安装器 / 双系统切换。
+浏览器硬解、deep suspend、蜂窝网络与通话。两边都没有的：前置摄像头、休眠到磁盘（我们有
+`disk` 状态但没测过）。硬件视频编码原先两边都没有：对方的 `liuqin-linux-kit` 做通了，我们照它
+移植成 0119–0129（2026-11-26，见第 17a 行）。对方有而我们没有的：指纹、快充认证、关机充电、
+DP 输出、USB3、GNOME 桌面与安装器 / 双系统切换。
 
 ## 2. 实测明细（diting）
 

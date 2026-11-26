@@ -19,8 +19,15 @@ HEVC 都与软解逐帧逐字节一致（1080p 和 4K），4K HEVC 10-bit 硬解
 
 - **VA-API 路径解 10-bit 是坏画面**（`libva-v4l2-stateful` 把 P010 当 NV12 读，已截图）。
 - **GStreamer 的 `v4l2vp9dec` 解 VP9 会插入坏帧并丢帧**；浏览器走的 VA-API 不受影响。
+  （2026-11-26 晚，换上 0119–0129 之后复测：1080p 测试图流 90/90 一致了，带隐藏 alt-ref 帧的
+  流仍然坏。）
 
 详见 [VIDEO_DECODE.md](VIDEO_DECODE.md)。
+
+**更正（2026-11-26 晚）**：上面“内核侧没有值得换过去的东西”对照的是 liuqin 的主线内核仓库，
+只对解码成立。对方另有一个 `wkai343/liuqin-linux-kit`（7.3.4 + 80 个补丁），在同一个 SoC 上把
+H.264 / HEVC 硬件编码做通了，掉电序列、复位和上限也更接近原厂驱动。我们照它移植成
+0119–0129，换上手机实测通过，见 [KERNEL_COMMITS.md §8](KERNEL_COMMITS.md)。
 
 ### 2. 25 项功能逐项对照
 
@@ -120,13 +127,15 @@ FPC 专属的。已经查清的：
 
 ## 还没做的
 
-- 第一批补丁（0106–0115）已写好并在内核容器里编译通过，其中电量单位的两个在手机上
-  用热加载验证过；0115 已提交（手机上一直在跑的设备树）。0106–0114 要换内核镜像才能
-  测，还没有刷到手机上，也还没有提交。
-  状态和验收项见 [KERNEL_COMMITS.md §8](KERNEL_COMMITS.md)。
+- 两批补丁都已在手机上实测并提交到 `driver-fix`：第一批 0106–0118（0115 单独提交，更早），
+  第二批 0119–0129（iris 编码器，照 liuqin-linux-kit 移植）。状态和验收项见
+  [KERNEL_COMMITS.md §8](KERNEL_COMMITS.md)。
+- 硬件编码的用户态还没跟上：原版 ffmpeg 在帧高度不是 32 的倍数时随机崩溃；kit 的 7 个 FFmpeg
+  补丁（按补齐高度拷贝 NV12、读可见矩形、尾帧、DRM PRIME 输出、时间戳等）没有移植。
 - diting 是否真的没有 SuperSpeed 走线：只有 OTG.md 的结论和原厂 DT 的 `high-speed`，固件经
   UCSI 报告的端口能力是 `usb2 [usb3]`，没有实测。
-- VP9 的 GStreamer 坏帧、VA-API 10-bit 坏画面只确认了现象，没有查根因。
+- VP9 带隐藏帧时 GStreamer 的坏帧（0119–0129 只改善了没有隐藏帧的流）、VA-API 10-bit 坏画面，
+  只确认了现象，没有查根因。
 - 指纹只做到静态侦察。diting 的 TA 协议、`keymaster64` 的命令号、原厂 HAL 的调用都还没看。
 - 充电整组的 XM 属性编号要从 diting 的原厂模块 `qti_battery_charger_main_m81.ko` 重新推导。
 - 第一轮测试里出现过一次 32 秒的解码停顿，没有复现。

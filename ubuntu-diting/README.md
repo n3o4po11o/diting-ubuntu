@@ -6,8 +6,10 @@ plus the Diting patch series in `../kernel/patches`.
 
 Status: runs as a daily-usable phone on the owner's unit (Phosh, calls, SMS,
 mobile data, Wi-Fi, audio, sensors, two rear cameras, hardware video
-decoding). Per-subsystem evidence: `../docs/BRINGUP_STATUS.md`; open problems:
-`docs/KNOWN_ISSUES.md`. Installing a released image: `release/INSTALL.md`.
+decoding; H.264/HEVC hardware encoding too since patches 0119–0129,
+2026-11-26). Per-subsystem evidence: `../docs/BRINGUP_STATUS.md`; open
+problems: `docs/KNOWN_ISSUES.md`. Installing a released image:
+`release/INSTALL.md`.
 
 ## Layout
 

@@ -172,14 +172,32 @@ in `docs/BRINGUP_STATUS.md`.
   boot (harmless so far).
 - `systemd-networkd` runs next to NetworkManager.
 
-### Video encoder resets the phone (SM8475 iris, r35)
+### Video encoding: enabled since 0119–0129, with limits (2026-11-26)
 
-The hardware encoder is disabled in r36 (only `/dev/video0`, the decoder, is
-registered). With the encoder enabled, starting the raw input port hangs the
-video firmware and the next command the driver writes resets the whole SoC.
-No pstore record survives (on this phone pstore is empty even after a normal
-warm reboot), so debugging needs a live `dmesg -w` over the network with
-`printk_delay`, and the firmware's own log (`HFI_PROP_DEBUG_LOG_LEVEL`).
+The iris encoder is registered again (driver-fix with patches 0119–0129, on
+the phone since 2026-11-26 18:18): `/dev/video1`, "Iris Encoder", a V4L2
+stateful encoder - `h264_v4l2m2m` and `hevc_v4l2m2m` in ffmpeg. GStreamer
+has no element for it, and there is no VA-API encoder. What the encoder did
+in r35, and what ended it, is under "Fixed" below. Read on the phone: H.264
+and HEVC at 720p30, 1080p30, 1080p60 and 4K30, every frame sent is in the
+stream (decoded in software and compared with the source: PSNR 39-46 dB);
+two encoders at once; an encoder next to a hardware decoder, the decoder's
+output unchanged; CBR at 4 Mbit/s, 300 frames; 1800 frames in one go. The
+kernel log had nothing new through all of it. Limits:
+
+- **The stock ffmpeg crashes at random when the frame height is not a
+  multiple of 32.** The encoder negotiates its input buffer for the padded
+  height (736 lines for 720) and the stock ffmpeg copies that many rows from
+  the frame it is given, past its end: whether that faults depends on where
+  the frame was allocated. On 2026-11-26, 10 of 15 runs at 720p, 1080p and
+  960x540 ended with SIGSEGV (exit 139) before the first frame, the other 5
+  encoded the same input correctly; the kernel log says nothing. With the
+  input padded first (`-vf pad=1280:736` for 720p) every run passes, and the
+  stream then has the padded height. liuqin-linux-kit's ffmpeg patch 0001
+  copies the visible rows only; until it is ported, pad the input.
+- No forced keyframes: the driver offers no control for it (upstream 7.3
+  has one).
+- The HEVC level is not constrained by the driver (H.264's is, by 0128).
 
 ### Browser video decoding (VA-API over V4L2)
 
@@ -212,7 +230,13 @@ calls `disable_irq()`, while the IRQ thread waits for that lock); the
 shutdown hang may be the same path. Not yet confirmed; the deadlock itself
 is, see the next entry.
 
-### The iris error path deadlocks when the firmware watchdog fires (2026-11-26)
+Since 0121 (driver-fix, 2026-11-26) the IRQs are drained before the
+power-off and outside `core->lock`, which is this deadlock. The module was
+not removed again to try it (`qcom_iris` is not unloaded and reloaded on
+this phone, see below), and no shutdown has been watched for the hang
+since.
+
+### The iris error path deadlocks when the firmware watchdog fires (2026-11-26; the IRQ wait fixed by 0121, read again that evening)
 
 Reproduced on the decode path, on formal-7.2.10-52 with the r54 DTB. Twelve
 VA-API decoders were started at once on the one iris decoder (to read which
@@ -244,6 +268,41 @@ for the shutdown hang, on a path decode alone reaches. The fix belongs in
 and failing opens and session stops with an error once the core is in the
 error state, instead of resuming the device. Until then, few decode sessions
 at a time, and a reboot when `dmesg` shows the watchdog lines.
+
+**Read again on 2026-11-26 in the evening**, on driver-fix with 0119–0129
+(0121 is the fix this entry asks for; 0119, 0120 and 0123 change the
+power-off around it): twelve VA-API decoders at once again, this time on a
+4K clip. The firmware did not reach its watchdog. The driver let eight
+sessions through (the frame limit of 0123), refused four
+(`current session not supported(-12)`; ffmpeg decoded those four in
+software), and the firmware answered the eight with `system error of type
+0x5000003` - `HFI_SYS_ERROR_FATAL` in the vendor's `hfi_property.h`. No
+`core init failed`, no `Unbalanced enable`, no process in D state: the
+system-error worker ran to the end and the core went back to suspended.
+Decoding (VA-API and ffmpeg's `hevc_v4l2m2m`, both equal to a software
+decode) and encoding worked in the same boot afterwards. What this shows is
+that a firmware system error no longer locks the driver. It does not show
+that the watchdog path is fixed: that path was not reached again, and the
+clip of the morning is not on record, so the two runs are not the same
+load.
+
+What the overload still leaves. None of it is reached with a few sessions
+at a time:
+
+- A WARNING at `videobuf2-core.c:1821` in `vb2_start_streaming`: on a failed
+  start the driver hands the queued buffers back as `STATE_ERROR`, where vb2
+  asks for `STATE_QUEUED`. The same line in the morning's run; upstream
+  reads the same in 7.3.4.
+- One SMMU context fault from the video core (`SID=0x2184`,
+  `iova=0x07e00000`, a translation fault) while the sessions failed: an
+  address that was not mapped at that moment. None in the 1085 s before,
+  none after.
+- Two of the eight ffmpeg processes spun in user space after the decoder
+  error (one frame thread at 100 % CPU) and ignored SIGTERM; SIGKILL ends
+  them. Nothing stays in the kernel.
+- The driver's limit (eight 4K sessions) is above what the firmware serves
+  at that load. `iris_check_core_mbps()` exists for the load and is not
+  called by the admission check.
 
 ### The video decoder on a cold start: frames differ, and a reset after a reload by hand (2026-11-26, ON HOLD)
 
@@ -283,6 +342,19 @@ What it costs: nothing in normal use so far. Two complete boots with this
 kernel, no process in D state, no decoder error in either log. The sample
 clips, all under `/var/tmp`, were removed. pstore gave nothing on this reset:
 after such an end, do not count on a console log.
+
+### Boot: ten SMMU context faults in the log, at least 3,232 in all (2026-11-26)
+
+Each of the last sixteen boots in the journal logs ten `Unhandled context
+fault` lines from the display controller (`mdss`: `SID=0x2800` and `0x2c00`
+are one stream, its mask is `0x402`; `cb=9`; IOVAs from `0xb8000980` up) in
+the first seconds, known as "the ten at boot". They are the first ten: the
+line is limited to ten per 5 s, and when the next fault of that SMMU
+arrived, 1083 s later in the boot of 2026-11-26 18:18, the kernel reported
+`arm_smmu_context_fault: 3222 callbacks suppressed` - that many more were
+dropped in the same burst. The display driver probing while the bootloader's
+splash is still being scanned out is the likely reason; not looked at.
+Harmless so far, and the same on every boot of this kernel line.
 
 ### Char-device use-after-free at boot (oops in `kobj_lookup`)
 
@@ -328,6 +400,17 @@ on the test phone now sets 10 s (applies only after systemd-sysctl).
 
 ## Fixed, kept here for context
 
+- **The video encoder (0119–0129, 2026-11-26).** With the encoder enabled
+  in r35, starting its raw input port hung the firmware and the next
+  command reset the SoC, so r36 registered the decoder only. On Iris2 the
+  encoder's ARP buffers belong in the secure non-pixel DMA context (SID
+  `0x2184`, VMID 11 = `CP_NON_PIXEL`), with that context's page tables
+  shared with the VMID through `qcom_scm_assign_mem`; the core also needs
+  the vendor's reset and power-down sequence. liuqin-linux-kit had both on
+  the same SoC. The eleven patches take its six and three upstream fixes
+  (7.2.10 lacks them; 7.3.4 is not needed, the phone's firmware and device
+  tree already have the secure context). `docs/liuqin-study/KERNEL_COMMITS.md`
+  §8 lists them; the limits that remain are in "Video encoding" above.
 - **A configuration change and the modules on the phone (2026-11-26).** The
   phone keeps the modules of its package; they fit a new kernel only while
   the configuration stays. With the filesystems switched on, two things went
