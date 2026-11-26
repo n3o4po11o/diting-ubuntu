@@ -773,7 +773,7 @@ VMID 11；核心的复位和掉电要按原厂驱动的顺序来。diting 的设
 | 编码 | 静态 ffmpeg 9.1（带 kit 的 7 个补丁）各档帧数全对；手机自带的 ffmpeg 偶发丢尾帧（用户态的问题，见 KNOWN_ISSUES） |
 
 **事故**：这一批的第一版还把出错实例的队列标记为错误（`iris_inst_change_state()` 里调
-`vb2_queue_error()`）。用它时手机复位了两次（21:33，以及一小时后带实时日志的重放）。根因不是
+`vb2_queue_error()`）。用它时手机复位了两次（21:33，以及七分钟后带实时日志的重放）。根因不是
 标记，是上游 `iris_core_init()` 的那个洞（0135）：固件报错之后、恢复线程运行之前，一次 `open()`
 被拒绝，顺带把核心状态写成了 `IRIS_CORE_DEINIT`，而核心还开着；恢复线程因此跳过断电，再上电时
 报 `Unbalanced enable for IRQ 219`（就在那条 `core init failed` 之后 9.6 毫秒），2 秒后看门狗，
