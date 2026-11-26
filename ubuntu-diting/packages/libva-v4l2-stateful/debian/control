@@ -23,6 +23,10 @@ Description: VA-API driver for V4L2 stateful video decoders (Diting iris)
  Also installed as msm_drv_video.so, the name libva derives from the msm
  DRM driver, so applications use it without LIBVA_DRIVER_NAME.
  .
+ A udev rule names the decoder /dev/video-dec0, one of the two paths the
+ driver opens (the other, /dev/video0, is the decoder only when it registers
+ before the cameras).
+ .
  Firefox works directly. Snap Chromium cannot read host libraries: a
  systemd user service copies the driver into ~/snap/chromium/common/dri
  at login (see diting-chromium-vaapi).

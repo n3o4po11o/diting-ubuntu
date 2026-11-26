@@ -1,3 +1,11 @@
+libva-v4l2-stateful (0.1.0+git6447ebb-0diting3) resolute; urgency=medium
+
+  * udev rule: symlink /dev/video-dec0 to the iris decoder. The driver opens
+    only /dev/video0 or /dev/video-dec0, and the decoder is /dev/video0 only
+    when it registers before the cameras (2026-11-27: it was /dev/video4).
+
+ -- ubuntu-diting local build <ubuntu-diting@localhost>  Fri, 27 Nov 2026 04:50:00 +0800
+
 libva-v4l2-stateful (0.1.0+git6447ebb-0diting2) resolute; urgency=medium
 
   * Set up snap Chromium at every login, also before its first start.

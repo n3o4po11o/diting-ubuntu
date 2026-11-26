@@ -1,2 +1,3 @@
 debian/diting-chromium-vaapi usr/bin
 debian/firefox-vaapi.js usr/lib/firefox/defaults/pref
+debian/70-diting-iris-decoder.rules usr/lib/udev/rules.d

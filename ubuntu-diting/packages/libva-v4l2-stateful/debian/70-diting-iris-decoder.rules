@@ -1,0 +1,5 @@
+# libva-v4l2-stateful opens only /dev/video0 or /dev/video-dec0 (v4l2_open_device).
+# The iris decoder is /dev/video0 only when it registers before the cameras: on
+# 2026-11-27 they came first and it was /dev/video4, so no browser decoded in
+# hardware. Name it, whatever its number.
+SUBSYSTEM=="video4linux", ATTR{name}=="qcom-iris-decoder", SYMLINK+="video-dec0"
