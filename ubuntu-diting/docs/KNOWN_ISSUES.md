@@ -356,6 +356,17 @@ dropped in the same burst. The display driver probing while the bootloader's
 splash is still being scanned out is the likely reason; not looked at.
 Harmless so far, and the same on every boot of this kernel line.
 
+### One boot with `qcom-battmgr-usb` not answering `voltage_now` once (2026-11-26 18:18; seen once)
+
+`power_supply qcom-battmgr-usb: driver failed to report 'voltage_now'
+property: -110` at 11.68 s of the boot of driver-fix batch 4, between the
+`hexagonrpcd` lines that say the ADSP's `sns_registry` is not there yet.
+None of the seven boots before it has the line, and that batch does not
+touch the battery code (`qcom_battmgr.ko` is the one of batch 1). The
+property read 5.23 V an hour later. Most likely a read that reached the
+driver before the ADSP's battery manager answered. Seen once: watched, not
+chased.
+
 ### Char-device use-after-free at boot (oops in `kobj_lookup`)
 
 Seen twice on r35/r36: `v4l_id` (udev) oopses in `chrdev_open` ->
