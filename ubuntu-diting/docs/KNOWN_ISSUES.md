@@ -416,7 +416,7 @@ Workaround (shipped as a note, not packaged): disable idle blanking —
 
 A proper fix needs panel/driver work on the dim path (patch 0015 territory).
 
-## The AP cannot write the PMK8350 RTC on this device (2026-11-21)
+## The PMK8350 RTC: the AP cannot write it, and reading it at boot put the clock in 1970 (2026-11-21; the second half found and fixed 2026-11-26)
 
 The SPMI PMIC arbiter rejects every AP write to the RTC registers
 ("disallowed SPMI write to sid=0, addr=0x61xx"): allow-set-time makes
@@ -426,6 +426,23 @@ writes per boot). The RTC is read-only for the AP - the Rubik Pi 3
 precedent does not transfer. Keep the RTC read-only (patch 0028 as
 upstream); time persistence is systemd's timesync clock file plus NTP
 after any unclean poweroff.
+
+The other half, found on 2026-11-26: reading it is as wrong as writing it.
+The RTC counts from 1970-01-01 at every PMIC reset. Its driver is a module
+(`rtc-pm8xxx.ko`, loaded at 5 s), and `drivers/rtc/class.c` sets the system
+clock from the device named in `CONFIG_RTC_HCTOSYS_DEVICE` when that device
+registers, whatever the clock is. So systemd restored
+`/var/lib/systemd/timesync/clock` at 4 s, and at 5.38 s the clock went back
+to 1970 and stayed there until the first NTP reply — 245 s after boot in
+the boot of 08:29 that day. In that window certificates fail, new files get
+1970 timestamps, and the journal is out of order.
+
+`kernel/config/diting.config` now has `# CONFIG_RTC_HCTOSYS is not set`
+(driver-fix). DEVICE-TESTED 2026-11-26 09:03: the journal of the boot after
+the change has systemd's "System time advanced" line at 3.4 s, no
+"setting system clock" line, and no entry stamped before 2026; the clock
+was 9 s behind until NTP, instead of 56 years. The RTC is still registered
+as rtc0, so wake alarms are as before.
 
 ## CN units: no audio - the ADSP's SPF never answers (2026-11-21, RESOLVED 2026-11-22)
 
