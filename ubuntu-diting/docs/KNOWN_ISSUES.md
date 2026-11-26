@@ -226,6 +226,18 @@ the `libva-v4l2-stateful` package (patched VA-API driver, also installed as
   `~/snap/chromium/common/dri` at login and writes `~/.chromium-browser.init`
   (VA-API feature flags) if there is none. After a package upgrade the copy
   is refreshed at the next login, or by running `diting-chromium-vaapi`.
+- **The driver opens only `/dev/video0` or `/dev/video-dec0`**
+  (`v4l2_open_device()` in upstream `src/v4l2-backend.c`). The iris decoder
+  is `/dev/video0` only when it registers before the cameras, a race at every
+  boot: on 2026-11-27 (the image of 40ae371, cameras first) it was
+  `/dev/video4`, `vainfo` said `No V4L2 M2M decoder found`, and Chromium
+  decoded in software although it had loaded the driver and could open the
+  decoder's node from inside the snap. The package installs
+  `/usr/lib/udev/rules.d/70-diting-iris-decoder.rules`, which symlinks
+  `video-dec0` to the decoder whatever its number (`make verify` checks that
+  it is in the image). With the rule in place `vainfo` lists the seven
+  profiles again, and Chromium, restarted, held the decoder open while a
+  video played.
 - **Chromium path**: Chromium never calls `vaSyncSurface`, so the driver
   finishes each picture in `vaEndPicture`, and decodes straight into
   Chromium's buffers with only one CAPTURE buffer queued at a time (the
