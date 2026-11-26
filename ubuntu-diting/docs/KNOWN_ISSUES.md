@@ -215,6 +215,13 @@ kernel log had nothing new through all of it. Limits:
   has one).
 - The HEVC level is not constrained by the driver (H.264's is, by 0128).
 
+Hardware encoding **in the browsers** is a separate road: Chromium on Linux
+encodes through VA-API and needs `VAEntrypointEncSlice` from the driver, which
+`libva-v4l2-stateful` does not have (it decodes only). What it takes - the
+`qcom-va-driver` reference implementation, its gaps against Chromium, the
+kernel and driver changes - is evaluated in `docs/VIDEO_ENCODE.md`; none of it
+is implemented.
+
 ### Browser video decoding (VA-API over V4L2)
 
 Firefox and Chromium decode H.264, HEVC and VP9 on the iris decoder through
