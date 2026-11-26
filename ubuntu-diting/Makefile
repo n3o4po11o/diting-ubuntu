@@ -5,7 +5,7 @@ S := scripts
 SUDO ?= sudo -E
 
 .PHONY: help modemmanager phosh check-host sources reference references check-latest-kernel update-kernel kernel dtbs phoc sensors libcamera \
-	dtbs-check packages vaapi firmware-setup mobile-config-firefox firmware rootfs release owner-release initramfs boot image verify \
+	dtbs-check packages vaapi ffmpeg firmware-setup mobile-config-firefox firmware rootfs release owner-release initramfs boot image verify \
 	repro-check qemu-test inspect-device lint clean distclean
 
 help:
@@ -46,6 +46,10 @@ packages:
 ## vaapi                libva-v4l2-stateful (VA-API driver for the iris decoder; arm64 buildd chroot)
 vaapi:
 	$(S)/build-libva-v4l2-stateful.sh
+## ffmpeg              static ffmpeg + ffprobe with the V4L2 patches (ci/FFMPEG.md; ci/ffmpeg.sh, on the phone too)
+ffmpeg:
+	$(S)/fetch-sources.sh --ffmpeg
+	$(S)/build-ffmpeg.sh
 ## phosh                Ubuntu phosh + screen stays off on automatic wake-ups (arm64 buildd chroot)
 phosh:
 	$(S)/build-phosh.sh

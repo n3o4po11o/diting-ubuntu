@@ -78,9 +78,11 @@ ref_has_commit() { # name dir commit
 # The CIX P1 build host (edge kernel 7.1.8) corrupts compiler memory under
 # parallel load when transparent huge pages are used: 6/72 vs 0/72 crashing
 # parallel compiles (docs/BUILD.md). Run builds with THP disabled per
-# process via prctl; this does not change any host setting.
+# process via prctl; this does not change any host setting. (Linux only: on
+# another system nothing is compiled, and the scripts that do not build - the
+# fetches, packages/ffmpeg-diting/rebase.sh - run as they are.)
 NOTHP=""
-if [ "${DITING_NOTHP:-1}" = 1 ]; then
+if [ "${DITING_NOTHP:-1}" = 1 ] && [ "$(uname -s)" = Linux ]; then
 	NOTHP="$WORK/tools/nothp-$(uname -m)"
 	if [ ! -x "$NOTHP" ] || [ "$DITING_TOP/tools/src/nothp.c" -nt "$NOTHP" ]; then
 		mkdir -p "$WORK/tools"

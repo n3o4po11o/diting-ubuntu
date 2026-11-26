@@ -1,0 +1,51 @@
+# FFmpeg build image for ubuntu-diting: what builds the static ffmpeg and
+# ffprobe of packages/ffmpeg-diting, and nothing else, so that a host needs
+# nothing but docker for it - the phone itself, where the binaries are tried
+# and whose system stays as it is. ci/FFMPEG.md has the commands.
+#
+#   docker build -t diting-ffmpeg:$REV -f ubuntu-diting/ci/Dockerfile.ffmpeg ubuntu-diting/ci
+#   ubuntu-diting/ci/ffmpeg.sh shell          # a bash in the container, the checkout at /src
+#   ubuntu-diting/ci/ffmpeg.sh make ffmpeg    # a Makefile target, in tmux inside the container
+#
+# The base image is the one of ci/Dockerfile (the from-zero builder) and
+# ci/Dockerfile.kernel, pinned by digest. /usr/share/diting-ffmpeg-packages.tsv
+# in the image lists what it contains.
+FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG VCS_REF=unknown
+
+# What scripts/build-ffmpeg.sh and the fetch before it need: the compiler,
+# git and gpg for the signed release tag, patch for the series, file to tell
+# a static binary from a dynamic one; sudo because the scripts call it (as
+# root it asks for nothing); tmux, for what ci/ffmpeg.sh `make` runs in.
+# libdrm-dev with pkg-config is the one library linked in: FFmpeg has no DRM
+# device context without it, and the ffmpeg command line needs that context
+# for the DRM PRIME frames the decoder patches export (-hwaccel drm).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+		ca-certificates sudo tzdata \
+		git gnupg patch \
+		build-essential file \
+		libdrm-dev pkg-config \
+		tmux less vim-tiny \
+	&& rm -rf /var/lib/apt/lists/* \
+# The checkout is bind-mounted from the host and owned by another user.
+	&& git config --system --add safe.directory '*'
+
+# What the image contains, for the build record.
+RUN dpkg-query -W -f='${Package}\t${Version}\n' > /usr/share/diting-ffmpeg-packages.tsv
+
+# The two scripts of the kernel image that are about the container, not the
+# kernel: diting-kernel-entrypoint gives the uid that owns the checkout a
+# name and a home, so that git and tmux behave as usual for `docker exec -u`;
+# diting-kernel-make is what `make` runs inside tmux.
+COPY diting-kernel-entrypoint diting-kernel-make /usr/local/sbin/
+RUN chmod 755 /usr/local/sbin/diting-kernel-entrypoint /usr/local/sbin/diting-kernel-make
+
+LABEL org.opencontainers.image.title="diting-ffmpeg" \
+	org.opencontainers.image.description="FFmpeg build environment for ubuntu-diting (Debian 13, ci/FFMPEG.md)" \
+	org.opencontainers.image.revision="${VCS_REF}"
+
+WORKDIR /src/ubuntu-diting
+ENTRYPOINT ["/usr/local/sbin/diting-kernel-entrypoint"]
+CMD ["sleep", "infinity"]

@@ -10,6 +10,7 @@
 #   fetch-sources.sh --ref sm8450-fdt [NAME...]   make reference NAME=sm8450-fdt
 #   fetch-sources.sh --references                 make references: all of those
 #   fetch-sources.sh --all                        the kernel and every tree
+#   fetch-sources.sh --ffmpeg                     the FFmpeg of packages/ffmpeg-diting, signed tag checked
 #
 # Never resets or modifies an existing checkout of the kernel or of a tree
 # that is only read. An existing checkout of a build input is put on its
@@ -42,6 +43,38 @@ fetch_kernel() {
 	log "kernel $KERNEL_TAG: signature by $KERNEL_TAG_SIGNER_FPR verified"
 }
 
+# The FFmpeg that packages/ffmpeg-diting builds from, locked the same way:
+# by tag, checked against the commit and the signature.
+fetch_ffmpeg() {
+	local dir="$DITING_TOP/references/ffmpeg"
+	if [ ! -d "$dir/.git" ]; then
+		# A clone cannot resume where a cut connection stopped it: start over.
+		local try
+		for try in 1 2 3; do
+			log "cloning FFmpeg $FFMPEG_TAG (try $try)"
+			rm -rf "$dir"
+			git clone --depth 1 -b "$FFMPEG_TAG" "$FFMPEG_URL" "$dir" && break
+			[ "$try" -lt 3 ] || die "cannot clone FFmpeg $FFMPEG_TAG from $FFMPEG_URL"
+			sleep $((try * 5))
+		done
+	fi
+	git -C "$dir" cat-file -e "$FFMPEG_TAG^{commit}" 2>/dev/null ||
+		git -C "$dir" fetch --depth 1 origin tag "$FFMPEG_TAG"
+	[ "$(git -C "$dir" rev-parse "$FFMPEG_TAG^{commit}")" = "$FFMPEG_COMMIT" ] ||
+		die "tag $FFMPEG_TAG does not point at locked commit $FFMPEG_COMMIT"
+
+	# The signer's key is in the tree (config/keyrings), not on a keyserver.
+	export GNUPGHOME="$WORK/gnupg/ffmpeg"
+	mkdir -p "$WORK/gnupg"
+	[ -d "$GNUPGHOME" ] || mkdir -m 700 "$GNUPGHOME"
+	gpg --batch --import "$UD/config/keyrings/ffmpeg-release.asc" 2>/dev/null
+	local status
+	status="$(LC_ALL=C git -C "$dir" verify-tag --raw "$FFMPEG_TAG" 2>&1 || true)"
+	grep -q "^\[GNUPG:\] VALIDSIG $FFMPEG_TAG_SIGNER_FPR " <<<"$status" ||
+		die "signature verification of $FFMPEG_TAG failed:\n$status"
+	log "FFmpeg $FFMPEG_TAG: signature by $FFMPEG_TAG_SIGNER_FPR verified"
+}
+
 # The trees that are only read: community and vendor sources to compare with.
 # A line each: name, URL, and the branch where not the default one.
 references() {
@@ -69,7 +102,7 @@ fetch_ref() { # dir url [branch]
 # The trees a build needs, each at the commit pinned in config/diting.conf.
 inputs() {
 	printf '%s\n' audioreach-topology ar-audioreach-graphservices fastrpc hexagonrpc \
-		libssc iio-sensor-proxy libva-v4l2-stateful mobile-config-firefox
+		libssc iio-sensor-proxy libva-v4l2-stateful mobile-config-firefox ffmpeg
 }
 
 input() { # name
@@ -82,6 +115,7 @@ input() { # name
 	iio-sensor-proxy) need_ref "$1" "$IIO_SENSOR_PROXY_URL" "$IIO_SENSOR_PROXY_COMMIT" ;;
 	libva-v4l2-stateful) have_ref "$1" "$LIBVA_V4L2_URL" "$LIBVA_V4L2_COMMIT" ;;
 	mobile-config-firefox) have_ref "$1" "$MOBILE_CONFIG_FIREFOX_URL" "$MOBILE_CONFIG_FIREFOX_COMMIT" ;;
+	ffmpeg) fetch_ffmpeg ;;
 	*) die "no source named $1 (--help lists them)" ;;
 	esac
 }
@@ -100,6 +134,7 @@ fetch_one() { # name: a tree that is only read, else a build input
 usage() {
 	cat <<EOF
 usage: fetch-sources.sh                 the locked kernel, signature-checked (make sources)
+       fetch-sources.sh --ffmpeg        the FFmpeg of packages/ffmpeg-diting, signature-checked
        fetch-sources.sh --ref NAME...   only these trees (make reference NAME=NAME)
        fetch-sources.sh --references    the trees that are only read (make references)
        fetch-sources.sh --all           the kernel and every tree
@@ -111,6 +146,7 @@ EOF
 
 case "${1:-}" in
 	"" | --kernel-only) fetch_kernel ;;  # --kernel-only: what the default is now
+	--ffmpeg) fetch_ffmpeg ;;
 	--ref)
 		shift
 		[ $# -gt 0 ] || usage
