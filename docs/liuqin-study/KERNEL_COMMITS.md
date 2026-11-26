@@ -544,21 +544,21 @@ listener”在 7.2.10 的上游代码里**没有**（上游只有内核内的 `a
 ## 8. 采纳记录（driver-fix 分支）
 
 第一批按 §6 的顺序做成了补丁，放在 `kernel/patches/0106`–`0115`（后九个来自 §6，0115 是
-核对时带上的，见下）。**0106–0114 还不在 git 历史里**：按项目的规矩，手机上跑过新内核之后才
-提交。
+核对时带上的，见下）。**0106–0114 在 2026-11-26 换上内核镜像、手机实测之后才提交**；
+0115 更早，单独提交（`c25c95e`）。
 
 | 补丁 | 来源 | 内容 | 状态 |
 | --- | --- | --- | --- |
-| 0106 | 上游 stable `812aa5346482`（原样） | HFI 中断只清 CM3 fault 位 | BUILD-TESTED |
-| 0107 | 上游 stable `2379434f8d3b`（原样） | 启动 GMU 前屏蔽 HFI 中断 | BUILD-TESTED |
-| 0108 | 上游 `8464e2284fec`（原样） | `disp_cc_mdss_mdp_clk_src` 的 ops | BUILD-TESTED |
-| 0109 | 上游 `eb34e2804ce4`（原样） | Lucid Ole PLL 已使能时跳过配置 | BUILD-TESTED |
-| 0110 | liuqin `594134933699`（原样） | GENI 串口挂起期间屏蔽中断 | BUILD-TESTED |
-| 0111 | liuqin `355dd22d6a31`（移植：只是落点不同，7.2 的冷/热启动判定多了 a8xx 分支） | 挂死恢复时强制冷启动 | BUILD-TESTED |
-| 0112 | liuqin `5bbdbea6a307`（移植：只有最后一个 hunk 的上下文不同） | glink 暂存端点就绪前的消息 | BUILD-TESTED |
-| 0113 | liuqin `787d0f7bf966`（改写：挂在我们自己的 `bat_prop_constant_current` 标志上，属性仍列出但返回 `-ENODATA`） | 电量计数 mAh → µAh，去掉占位的 `power_now` 和时间估计 | **DEVICE-TESTED**（热加载，见下） |
-| 0114 | 上游 stable `04854437df76`（移植：只有后面的上下文不同） | 电源设备不注册为唤醒源 | **DEVICE-TESTED**（热加载，见下） |
-| 0115 | **不是来自 liuqin**：本仓库 `encoder` 分支的 `0111-…-iris-Raise-MXC-…`，原样 | iris 在 366 / 444 MHz 两档把 MXC 提到下游要求的档位 | 手机上现跑的内核已经带着它 |
+| 0106 | 上游 stable `812aa5346482`（原样） | HFI 中断只清 CM3 fault 位 | DEVICE-TESTED（启动正常；它针对的挂死场景没有触发） |
+| 0107 | 上游 stable `2379434f8d3b`（原样） | 启动 GMU 前屏蔽 HFI 中断 | DEVICE-TESTED（同上） |
+| 0108 | 上游 `8464e2284fec`（原样） | `disp_cc_mdss_mdp_clk_src` 的 ops | **DEVICE-TESTED**：开机的 `rcg didn't update` 和 `clk_rcg2_shared_disable` 警告栈都没了 |
+| 0109 | 上游 `eb34e2804ce4`（原样） | Lucid Ole PLL 已使能时跳过配置 | DEVICE-TESTED（启动、显示正常；它防的花屏不会按需出现） |
+| 0110 | liuqin `594134933699`（原样） | GENI 串口挂起期间屏蔽中断 | DEVICE-TESTED（启动正常；挂起没法测，见下） |
+| 0111 | liuqin `355dd22d6a31`（移植：只是落点不同，7.2 的冷/热启动判定多了 a8xx 分支） | 挂死恢复时强制冷启动 | DEVICE-TESTED（启动正常；恢复路径没有触发） |
+| 0112 | liuqin `5bbdbea6a307`（移植：只有最后一个 hunk 的上下文不同） | glink 暂存端点就绪前的消息 | DEVICE-TESTED（启动：ADSP/CDSP/SLPI 服务都在；挂起没法测） |
+| 0113 | liuqin `787d0f7bf966`（改写：挂在我们自己的 `bat_prop_constant_current` 标志上，属性仍列出但返回 `-ENODATA`） | 电量计数 mAh → µAh，去掉占位的 `power_now` 和时间估计 | **DEVICE-TESTED**（热加载，和整机启动，见下） |
+| 0114 | 上游 stable `04854437df76`（移植：只有后面的上下文不同） | 电源设备不注册为唤醒源 | **DEVICE-TESTED**（热加载，和整机启动，见下） |
+| 0115 | **不是来自 liuqin**：本仓库 `encoder` 分支的 `0111-…-iris-Raise-MXC-…`，原样 | iris 在 366 / 444 MHz 两档把 MXC 提到下游要求的档位 | 手机上自 2026-11-23 起一直带着；这批编出的 DTB 与 r54 的相同 |
 
 “原样”是相对我们“v7.2.10 + 0001–0105”的树说的：零模糊度直接套上，`git am` 不需要模糊
 匹配。两个“移植”的代码与原补丁相同，只是重新生成了上下文。作者和提交说明都保留原作者的，
@@ -599,13 +599,47 @@ MHz 也没有量到——量它的尝试（12 路并发解码）把固件压到�
 
 USB 电源照常 `online=1`。测完已删掉 `updates/` 里的文件并重载回原模块，手机恢复原状。
 
-**还没验证的**：0106–0112 要换内核镜像才能测——GENI 串口和 glink 是内建的，GMU 在
-`msm.ko` 里，而换镜像意味着改写活动槽的 boot 分区。装包本身不刷写（手机上的钩子只在
-`/boot/diting/` 下重新生成镜像），但在启动镜像换上去之前重启，跑的会是旧内核配新模块，
-这个组合没有测过。按 `docs/SAFE_TESTING.md`，刷写这一步由机主决定。0115 的设备树改动
-就是手机上现在跑的，不需要再测。待测的是 §6 第一批列的验收项：T45b 的场景下 GMU 是否
-还会 OOB 超时、超时后能否恢复；开机 dmesg 里 `rcg didn't update its configuration` 是否
-消失；挂起后蓝牙是否还在；DSP 服务是否稳定出现。0114 对挂起的影响（充电器通知不再唤醒
-系统）也还没有测。
+**换上内核镜像之后的实测（2026-11-26）**：机主让代理直接刷。按机主的做法，交付物是
+`boot.img` 和 `vendor_boot.img`，不装 deb：在内核容器里用项目自带的 `diting-mkbootimg`
+生成两个镜像——本批的内核 Image、本批的 DTB、从现刷的 `vendor_boot_a` 里取出的
+initramfs、`diting.conf` 的命令行。两处交叉校验都对上了：`boot.img` 与“formal-52 的
+`boot.img` 从第 4096 字节起换成新内核”逐字节相同，`vendor_boot.img` 与 r54 的逐字节
+相同。所以只写了 `boot_a`，`vendor_boot_a` 没动。三个模块（`msm.ko`、
+`dispcc-sm8450.ko`、`qcom_battmgr.ko`）放进 `/lib/modules/7.2.10-diting/updates/` 再
+`depmod -a`：镜像里不带模块，不放进去这三处修复就不生效；其余 1716 个模块与手机上的
+代码相同（只差 20 字节的构建 ID），所需符号新内核全部导出。写之前把 `boot_a`、
+`vendor_boot_a` 完整备份到 `device-data/images/20261126-pre-driver-fix/`，并与手机核对过。
+镜像怎么生成、怎么刷、怎么回退，见 `release/driver-fix-batch1/README.md`。
 
-第二批（充电整组、GPU 终止故障策略、dts 的电压投票）和第三批（USB3 / DP）没有动。
+同一个手机，换之前和换之后：
+
+| 读数 | 之前 | 这批 |
+| --- | --- | --- |
+| `/proc/kallsyms` 里的 `qcom_glink_deliver_pending` | 0 | **1** |
+| 开机的 `rcg didn't update its configuration` | 每次开机 1 条 | **0** |
+| 开机时 `clk_rcg2_shared_disable` 的 WARNING 栈（udev 加载 dispcc） | 有 | **没有了** |
+| 开机头 180 秒的日志，warning 及以上的行数 | 3631 | **300** |
+| 启动失败的单元 | 18 个 | 1 个（`calls-daemon`，以前也失败）；第二次开机 0 |
+| `charge_counter` | 4097 | **4097000** |
+| `power_now` / `time_to_*_avg` | 10000000 / 0、65535 | 无数据 |
+| 三个 `qcom-battmgr` 电源设备的 `power/wakeup*` 属性 | 各 9 个 | **0 个** |
+| 开机后的系统状态 | degraded | **running** |
+| D 状态进程 | 10（那次开机的 iris 死锁） | **0** |
+
+蓝牙、Wi-Fi、面板、声卡、GPU、四个 remoteproc（调制解调器注册并连上）、12 个 `diting-*`
+服务都在。内核日志里没有新增的警告；原有的照旧（0.8 秒处的 10 条 SMMU context fault、
+CPU feature variation、dummy regulator、4 条 wcd938x）。
+
+**没有验证到的**：0106、0107、0111 针对 GPU 挂死，没有去触发；0109 防的花屏不会按需
+出现；0110 和 0112 的挂起场景没法测——日志里 50 次开机没有一次挂起。§6 第一批里“挂起后
+蓝牙是否还在”因此仍然待测，0114 对挂起的影响也一样。
+
+**视频解码只做了一次回归检查，然后按机主的决定搁置**：`VIDEO_DECODE.md` 里 GStreamer
+V4L2 对软解的逐帧比较，结果与旧内核上记录的相同。但开机后最先的几次解码，硬件输出与
+软解不一致，解码器用过一阵之后同一批片子又逐字节一致；为了不重启就复现，我手动卸载再
+加载了 `qcom_iris` 并立即解码，**手机当场复位**（日志戛然而止，pstore 为空），原因没有
+查。已记入 `ubuntu-diting/docs/KNOWN_ISSUES.md`。搁置的含义：其它驱动都正常之前，不做
+解码实验，也不卸载重载 `qcom_iris`。
+
+第二批（充电整组、GPU 终止故障策略、dts 的电压投票）和第三批（USB3 / DP）没有动，下一
+批从充电整组开始。

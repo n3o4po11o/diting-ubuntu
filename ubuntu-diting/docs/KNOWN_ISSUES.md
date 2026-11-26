@@ -239,6 +239,45 @@ and failing opens and session stops with an error once the core is in the
 error state, instead of resuming the device. Until then, few decode sessions
 at a time, and a reboot when `dmesg` shows the watchdog lines.
 
+### The video decoder on a cold start: frames differ, and a reset after a reload by hand (2026-11-26, ON HOLD)
+
+**On hold by the owner's decision**: video decoding stays as it is until the
+other drivers are in order. Nothing below is being worked on, and two things
+are not to be done on the phone meanwhile: decode experiments, and unloading
+`qcom_iris` to load it again.
+
+Read on driver-fix batch 1 (patches 0001–0115), the kernel the phone runs
+since 2026-11-26. The driver, its firmware and the device tree are what the
+phone ran before; the nine new patches touch none of them.
+
+- **The first decodes of a boot are not bit-exact.** Through ffmpeg with
+  VA-API (`libva-v4l2-stateful`), against a software decode of the same
+  clip: the first clip after boot (x264 medium, 60 frames) differed in all
+  60 frames, the second (x264 veryfast, 60 frames) in 50. A few minutes
+  later, with the decoder in use in between, the same two clips gave 60 of 60
+  and 150 of 150 identical frames, and the comparison of
+  `docs/liuqin-study/VIDEO_DECODE.md` (GStreamer V4L2 against software) gave
+  the result recorded there: H.264 and HEVC 8- and 10-bit 90 of 90, VP9 as
+  before. So the hardware is right once warm; what the first sessions after
+  boot do was not looked at. Whether the old kernel did the same was never
+  read: the tests of 2026-11-25 all ran hours after boot.
+- **A reload by hand reset the phone.** To reach a cold decoder without a
+  reboot, `qcom_iris` was unloaded and loaded again (`modprobe -r qcom_iris`,
+  `modprobe qcom_iris`, no user of `/dev/video0` at the time) and a decode
+  was started at once. The connection dropped in that moment. The journal of
+  that boot ends with nothing after the `sudo` line that started the test:
+  no shutdown, no kernel message; `/sys/fs/pstore` is empty; the phone came
+  back with the same boot reason fields as after a normal reboot
+  (`bootinfo.pureason=0x80001 bootinfo.pdreason=0x2`) and with the same
+  kernel and modules. Whether an unload and reload of `qcom_iris` is
+  supported at all — firmware, reserved memory, the protection domains —
+  was not checked.
+
+What it costs: nothing in normal use so far. Two complete boots with this
+kernel, no process in D state, no decoder error in either log. The sample
+clips, all under `/var/tmp`, were removed. pstore gave nothing on this reset:
+after such an end, do not count on a console log.
+
 ### Char-device use-after-free at boot (oops in `kobj_lookup`)
 
 Seen twice on r35/r36: `v4l_id` (udev) oopses in `chrdev_open` ->

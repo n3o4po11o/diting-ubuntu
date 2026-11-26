@@ -77,6 +77,43 @@ in the path a build is no longer the one `docs/BUILD.md` describes.
   that started the server. (Learned the hard way: a second `make kernel`
   in the same tree, stopped with SIGINT and the object directory removed.)
 
+## Boot images from a kernel alone
+
+`make boot` (`scripts/build-boot-image.sh`) wants the initramfs of a built
+rootfs (`$WORK/rootfs/boot/initrd.img-$KERNEL_RELEASE`), so a kernel update
+that way means a whole rootfs build first. It is not needed for a kernel: the
+initramfs the phone boots holds one module, `fuse.ko`, and nothing that
+belongs to a kernel build. A pair of images for a new kernel is made in the
+container from the kernel, its DTB, that initramfs and the command line, with
+the same tool `make boot` uses:
+
+    # inside the container, in /src/ubuntu-diting
+    bash packages/device-xiaomi-diting/src/diting-mkbootimg --conf config/diting.conf \
+         --kernel output/kernel/Image-7.2.10-diting \
+         --initrd work/flash-batch1/initrd.img-7.2.10-diting \
+         --dtb output/kernel/sm8475-xiaomi-diting.dtb \
+         --cmdline "root=PARTLABEL=userdata ro rootwait allow_mismatched_32bit_el0 diting.debug=usb" \
+         --out work/flash-batch1/images --name diting-ubuntu-7.2.10-diting-rootfs
+
+`config/diting.conf` has every variable the tool reads. The initramfs is the
+one out of the phone's `vendor_boot_a` on 2026-11-26: the vendor ramdisk of
+the image, at byte 4096, as long as the u32 at byte 24 of its `VNDRBOOT`
+header (20,678,557 bytes, zstd). `work/` is not in git; when it is gone, take
+it from the partition dump again (`device-data/images/<date>/vendor_boot_a.img`).
+When the initramfs itself changes (a module of the boot path, a hook), the
+rootfs has to be built.
+
+`verify-boot-image.sh` wants the stock images under `device-data/`, which the
+build host does not have. What tells the pair apart from the last one is
+simpler: a new `vendor_boot.img` that is byte for byte the image in
+`vendor_boot_a` means that only `boot.img` has to be written, and a
+`boot.img` compared with the last one, the kernel spliced in at byte 4096 (as
+long as the u32 at byte 8), shows that nothing else in it moved. That is how
+`release/driver-fix-batch1/` was made and checked; its README has the hashes.
+The modules of the build are not in either image: the ones a batch changed go
+to `/lib/modules/<release>/updates/` with `depmod -a` on the phone, or the
+package does it.
+
 ## Measured on the first host
 
 Debian 13 x86_64, 15 threads, 26 GiB, docker 29 (2026-11-26): the image
