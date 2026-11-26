@@ -1,0 +1,111 @@
+From 93594707da5188c98a4333092d8ae406478be4f7 Mon Sep 17 00:00:00 2001
+From: f <f@f>
+Date: Thu, 26 Nov 2026 17:46:29 +0800
+Subject: [PATCH] arm64: dts: qcom: sm8450: reset the video core wrapper at
+ power-on
+
+The vendor device tree of SM8450 gives the video codec two resets, the
+AXI bridge (video_axi_reset) and the MVS0C block (video_core_reset).
+The node carried only the first one. Add the second and let the driver
+pulse both when it powers the controller on, as the sibling port of
+this SoC does.
+
+The binding no longer fixes the order of the reset names for every
+SoC: each variant states its own list (bus, xo, core for SM8650; bus
+and core for SM8450; bus for the rest). The SM8450 variant is told
+apart with "contains", as compatible is a list in a device tree.
+
+Local Diting bring-up change, not submitted upstream.
+---
+ .../bindings/media/qcom,sm8550-iris.yaml      | 37 ++++++++++++++-----
+ arch/arm64/boot/dts/qcom/sm8450.dtsi          |  5 ++-
+ .../platform/qcom/iris/iris_platform_vpu2.c   |  2 +-
+ 3 files changed, 32 insertions(+), 12 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/media/qcom,sm8550-iris.yaml b/Documentation/devicetree/bindings/media/qcom,sm8550-iris.yaml
+index 5f3ca956c..f3c4869b5 100644
+--- a/Documentation/devicetree/bindings/media/qcom,sm8550-iris.yaml
++++ b/Documentation/devicetree/bindings/media/qcom,sm8550-iris.yaml
+@@ -74,10 +74,7 @@ properties:
+ 
+   reset-names:
+     minItems: 1
+-    items:
+-      - const: bus
+-      - const: xo
+-      - const: core
++    maxItems: 3
+ 
+   iommus:
+     maxItems: 2
+@@ -112,14 +109,36 @@ allOf:
+       properties:
+         resets:
+           minItems: 3
++          maxItems: 3
+         reset-names:
+           minItems: 3
++          items:
++            - const: bus
++            - const: xo
++            - const: core
+     else:
+-      properties:
+-        resets:
+-          maxItems: 1
+-        reset-names:
+-          maxItems: 1
++      if:
++        properties:
++          compatible:
++            contains:
++              const: qcom,sm8450-iris
++      then:
++        properties:
++          resets:
++            minItems: 2
++            maxItems: 2
++          reset-names:
++            items:
++              - const: bus
++              - const: core
++      else:
++        properties:
++          resets:
++            maxItems: 1
++          reset-names:
++            maxItems: 1
++            items:
++              - const: bus
+   - if:
+       properties:
+         compatible:
+diff --git a/arch/arm64/boot/dts/qcom/sm8450.dtsi b/arch/arm64/boot/dts/qcom/sm8450.dtsi
+index 79884bcfb..5ddc992ba 100644
+--- a/arch/arm64/boot/dts/qcom/sm8450.dtsi
++++ b/arch/arm64/boot/dts/qcom/sm8450.dtsi
+@@ -3251,8 +3251,9 @@
+ 
+ 			memory-region = <&video_mem>;
+ 
+-			resets = <&gcc GCC_VIDEO_AXI0_CLK_ARES>;
+-			reset-names = "bus";
++			resets = <&gcc GCC_VIDEO_AXI0_CLK_ARES>,
++				 <&videocc CVP_VIDEO_CC_MVS0C_BCR>;
++			reset-names = "bus", "core";
+ 
+ 			iommus = <&apps_smmu 0x2180 0x400>,
+ 				 <&apps_smmu 0x2187 0x400>;
+diff --git a/drivers/media/platform/qcom/iris/iris_platform_vpu2.c b/drivers/media/platform/qcom/iris/iris_platform_vpu2.c
+index d4bf5269c..cd29285f9 100644
+--- a/drivers/media/platform/qcom/iris/iris_platform_vpu2.c
++++ b/drivers/media/platform/qcom/iris/iris_platform_vpu2.c
+@@ -59,7 +59,7 @@ static const struct icc_info iris_icc_info_vpu2[] = {
+ 
+ static const char * const iris_clk_reset_table_vpu2[] = { "bus", "core" };
+ 
+-static const char * const sm8450_clk_reset_table[] = { "bus" };
++static const char * const sm8450_clk_reset_table[] = { "bus", "core" };
+ 
+ static const char * const sm8450_opp_pd_table[] = { "mxc", "mmcx" };
+ 

@@ -1,0 +1,39 @@
+From 6528aaa035de7f83e20e99498821b160b99dc064 Mon Sep 17 00:00:00 2001
+From: Sachin Kumar Garg <sachin.garg@oss.qualcomm.com>
+Date: Sat, 1 Aug 2026 12:14:49 +0530
+Subject: [PATCH] media: iris: force stage 1 work mode for CBR RC on encoder
+
+iris_set_stage() currently always picks STAGE_2 for encoder sessions.
+CBR rate control requires stage 1 operation, so force STAGE_1 when
+BITRATE_MODE is set to CBR.
+
+The BITRATE_MODE fw_cap value is used instead of inst->hfi_rc_type
+since STAGE precedes BITRATE_MODE in enum platform_inst_fw_cap_type,
+so iris_set_properties() would still see the previous hfi_rc_type
+when iris_set_stage() runs during initial config
+
+Reviewed-by: Vishnu Reddy <busanna.reddy@oss.qualcomm.com>
+Reviewed-by: Vikash Garodia <vikash.garodia@oss.qualcomm.com>
+Signed-off-by: Sachin Kumar Garg <sachin.garg@oss.qualcomm.com>
+Signed-off-by: Bryan O'Donoghue <bod@kernel.org>
+
+[ported by hand: in 7.2 iris_set_stage() sends work_mode directly instead of
+ storing it in inst->fw_caps; the added branch is the upstream one.]
+---
+ drivers/media/platform/qcom/iris/iris_ctrls.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/drivers/media/platform/qcom/iris/iris_ctrls.c b/drivers/media/platform/qcom/iris/iris_ctrls.c
+index c1ba08232..4da214626 100644
+--- a/drivers/media/platform/qcom/iris/iris_ctrls.c
++++ b/drivers/media/platform/qcom/iris/iris_ctrls.c
+@@ -552,6 +552,9 @@ int iris_set_stage(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id
+ 	if (inst->domain == DECODER) {
+ 		if (iris_res_is_less_than(width, height, 1280, 720))
+ 			work_mode = STAGE_1;
++	} else if (inst->domain == ENCODER) {
++		if (inst->fw_caps[BITRATE_MODE].value == V4L2_MPEG_VIDEO_BITRATE_MODE_CBR)
++			work_mode = STAGE_1;
+ 	}
+ 
+ 	return hfi_ops->session_set_property(inst, hfi_id,

@@ -1,0 +1,162 @@
+From 948bcf1f768482b632b6668505ed6dac536358e5 Mon Sep 17 00:00:00 2001
+From: f <f@f>
+Date: Thu, 26 Nov 2026 17:18:26 +0800
+Subject: [PATCH] media: iris: SM8450: take the Iris2 power-down sequence and
+ the vendor limits
+
+The SM8450 entry borrowed the VPU 2.0 operations of SM8250 whole. The
+power-off helper of that core collapses the power domain and the clocks
+without preparing the hardware, which is right for the Venus of SM8250
+and wrong for Iris2: the vendor Waipio driver's
+__power_off_iris2_hardware() waits for the NoC of every pipe to go
+idle, pulses the NoC reset and resets both AHB bridges before MVS0 is
+collapsed ("per HPG update"). The upstream VPU3 path performs these
+steps in this order, so SM8450 and SM8475 now take its power_off_hw
+through an operations table of their own. Along the way the "video hw
+is power on" message of that path becomes a debug message: the hardware
+is still on after every use, so an error for it would be logged on each
+idle power collapse.
+
+The clock formula stays the VPU 2.0 one. The newer formula drops the
+codec-dependent cost of the bitstream processing (CABAC x1.35 and VP9
+x1.70 in the vendor driver) and divides the pixel cost by the pipe
+count. For 4K60 it computes 114 MHz where the vendor formula computes
+191 MHz for a CABAC stream and 296 MHz for VP9, and where this kernel
+has been running the core at 444 MHz; it would pick the lowest clock
+for decoding as well as for encoding.
+
+The frame limits, the cycle costs and the core load limits become those
+of the Waipio driver: MAX_MBPF 276480 and MAX_MBPS 7833600 instead of
+the 8K60 figures of SM8250.
+
+Local Diting bring-up change, not submitted upstream. The limits and
+the cycle costs follow the SM8450 platform data of liuqin-linux-kit;
+the vendor sequences were checked against msm_vidc_iris2.c and
+msm_vidc_waipio.c of the Waipio video driver.
+---
+ .../platform/qcom/iris/iris_platform_vpu2.c   | 26 ++++++++++++++++---
+ drivers/media/platform/qcom/iris/iris_vpu2.c  | 14 ++++++++++
+ drivers/media/platform/qcom/iris/iris_vpu3x.c |  5 ++--
+ .../platform/qcom/iris/iris_vpu_common.h      |  2 ++
+ 4 files changed, 41 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/iris/iris_platform_vpu2.c b/drivers/media/platform/qcom/iris/iris_platform_vpu2.c
+index 74f363dbe..d4bf5269c 100644
+--- a/drivers/media/platform/qcom/iris/iris_platform_vpu2.c
++++ b/drivers/media/platform/qcom/iris/iris_platform_vpu2.c
+@@ -132,13 +132,31 @@ const struct iris_platform_data sm8250_data = {
+ 	.max_core_mbps = ((7680 * 4320) / 256) * 60,
+ };
+ 
++/*
++ * Frame limits and cycle costs from the Waipio video driver that ships
++ * with SM8450 (msm_vidc_waipio.c).
++ */
++static struct platform_inst_caps platform_inst_cap_sm8450 = {
++	.min_frame_width = 96,
++	.max_frame_width = 8192,
++	.min_frame_height = 96,
++	.max_frame_height = 8192,
++	.max_mbpf = ((8192 * 4320) / 256) * 2,
++	.mb_cycles_vsp = 25,
++	.mb_cycles_vpp = 200,
++	.mb_cycles_fw = 326389,
++	.mb_cycles_fw_vpp = 44156,
++	.max_frame_rate = MAXIMUM_FPS,
++	.max_operating_rate = MAXIMUM_FPS,
++};
++
+ /*
+  * SM8450 and SM8475 have the IRIS2 (VPU 2.0) core of SM8250, but their
+  * firmware speaks the Gen2 HFI.
+  */
+ const struct iris_platform_data sm8450_data = {
+ 	.firmware_desc = &iris_vpu20_p4_gen2_desc,
+-	.vpu_ops = &iris_vpu2_ops,
++	.vpu_ops = &sm8450_vpu_ops,
+ 	.icc_tbl = iris_icc_info_vpu2,
+ 	.icc_tbl_size = ARRAY_SIZE(iris_icc_info_vpu2),
+ 	.clk_rst_tbl = sm8450_clk_reset_table,
+@@ -156,7 +174,7 @@ const struct iris_platform_data sm8450_data = {
+ 	.dma_mask = 0xe0000000 - 1,
+ 	.inst_iris_fmts = iris_fmts_vpu2_dec,
+ 	.inst_iris_fmts_size = ARRAY_SIZE(iris_fmts_vpu2_dec),
+-	.inst_caps = &platform_inst_cap_vpu2,
++	.inst_caps = &platform_inst_cap_sm8450,
+ 	.tz_cp_config_data = tz_cp_config_vpu2,
+ 	.tz_cp_config_data_size = ARRAY_SIZE(tz_cp_config_vpu2),
+ 	.num_vpp_pipe = 4,
+@@ -166,6 +184,6 @@ const struct iris_platform_data sm8450_data = {
+ 	 */
+ 	.no_encoder = true,
+ 	.max_session_count = 16,
+-	.max_core_mbpf = NUM_MBS_8K,
+-	.max_core_mbps = ((7680 * 4320) / 256) * 60,
++	.max_core_mbpf = ((8192 * 4320) / 256) * 2,
++	.max_core_mbps = ((3840 * 2176) / 256) * 240,
+ };
+diff --git a/drivers/media/platform/qcom/iris/iris_vpu2.c b/drivers/media/platform/qcom/iris/iris_vpu2.c
+index b8714dcba..e6563098c 100644
+--- a/drivers/media/platform/qcom/iris/iris_vpu2.c
++++ b/drivers/media/platform/qcom/iris/iris_vpu2.c
+@@ -46,3 +46,17 @@ const struct vpu_ops iris_vpu2_ops = {
+ 	.calc_freq = iris_vpu2_calc_freq,
+ 	.set_hwmode = iris_vpu_set_hwmode,
+ };
++
++/*
++ * SM8450 and SM8475 carry the Iris2 core. Its power-down sequence is the one
++ * the vendor driver shares with the newer cores, so it comes from the VPU3
++ * path; the clocks stay sized with the VPU 2.0 formula above.
++ */
++const struct vpu_ops sm8450_vpu_ops = {
++	.power_off_hw = iris_vpu3_power_off_hardware,
++	.power_on_hw = iris_vpu_power_on_hw,
++	.power_off_controller = iris_vpu_power_off_controller,
++	.power_on_controller = iris_vpu_power_on_controller,
++	.calc_freq = iris_vpu2_calc_freq,
++	.set_hwmode = iris_vpu_set_hwmode,
++};
+diff --git a/drivers/media/platform/qcom/iris/iris_vpu3x.c b/drivers/media/platform/qcom/iris/iris_vpu3x.c
+index 3dad47be7..225d23f07 100644
+--- a/drivers/media/platform/qcom/iris/iris_vpu3x.c
++++ b/drivers/media/platform/qcom/iris/iris_vpu3x.c
+@@ -27,7 +27,7 @@ static bool iris_vpu3x_hw_power_collapsed(struct iris_core *core)
+ 	return pwr_status ? false : true;
+ }
+ 
+-static void iris_vpu3_power_off_hardware(struct iris_core *core)
++void iris_vpu3_power_off_hardware(struct iris_core *core)
+ {
+ 	u32 reg_val = 0, value, i;
+ 	int ret;
+@@ -35,7 +35,8 @@ static void iris_vpu3_power_off_hardware(struct iris_core *core)
+ 	if (iris_vpu3x_hw_power_collapsed(core))
+ 		goto disable_power;
+ 
+-	dev_err(core->dev, "video hw is power on\n");
++	/* The usual case after use: only a collapsed core takes the shortcut. */
++	dev_dbg(core->dev, "video hw is power on\n");
+ 
+ 	value = readl(core->reg_base + WRAPPER_CORE_CLOCK_CONFIG);
+ 	if (value)
+diff --git a/drivers/media/platform/qcom/iris/iris_vpu_common.h b/drivers/media/platform/qcom/iris/iris_vpu_common.h
+index 09799a375..32b02ea55 100644
+--- a/drivers/media/platform/qcom/iris/iris_vpu_common.h
++++ b/drivers/media/platform/qcom/iris/iris_vpu_common.h
+@@ -13,6 +13,7 @@ extern const struct vpu_ops iris_vpu3_ops;
+ extern const struct vpu_ops iris_vpu33_ops;
+ extern const struct vpu_ops iris_vpu35_ops;
+ extern const struct vpu_ops iris_vpu4x_ops;
++extern const struct vpu_ops sm8450_vpu_ops;
+ 
+ struct vpu_ops {
+ 	void (*power_off_hw)(struct iris_core *core);
+@@ -36,6 +37,7 @@ int iris_vpu_switch_to_hwmode(struct iris_core *core);
+ int iris_vpu_power_on(struct iris_core *core);
+ int iris_vpu_power_off_controller(struct iris_core *core);
+ void iris_vpu_power_off_hw(struct iris_core *core);
++void iris_vpu3_power_off_hardware(struct iris_core *core);
+ void iris_vpu_power_off(struct iris_core *core);
+ int iris_vpu35_vpu4x_power_off_controller(struct iris_core *core);
+ int iris_vpu35_vpu4x_power_on_controller(struct iris_core *core);
