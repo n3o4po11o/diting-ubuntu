@@ -328,6 +328,20 @@ on the test phone now sets 10 s (applies only after systemd-sysctl).
 
 ## Fixed, kept here for context
 
+- **A configuration change and the modules on the phone (2026-11-26).** The
+  phone keeps the modules of its package; they fit a new kernel only while
+  the configuration stays. With the filesystems switched on, two things went
+  wrong in one boot. `btrfs.ko` of the package, compiled before fscrypt and
+  fs-verity changed the layout of `struct inode`, oopsed in `open_ctree()`
+  when a test mounted a btrfs image; the superblock it left behind held its
+  lock, every later `sync()` waited forever, the phone got sluggish and the
+  reboot had to be `sync -f /` and SysRq-b. Then Wi-Fi did not come up:
+  `libarc4` had become built in, its file stayed, and `modprobe mac80211`
+  stopped at the dependency `libarc4.ko` ("exports duplicate symbol").
+  Since then btrfs, overlay, ubifs, cuse and NVMe are built in too, the files
+  of the 19 modules that became built in were moved away, and the lists of
+  the running build (`modules.builtin`) are on the phone. The procedure is in
+  `ci/KERNEL.md` ("When the configuration changes").
 - **ADSP services late or missing after boot** (device package 0.7.14):
   udev loaded `qcom_pd_mapper` in parallel with `qcom_q6v5_pas`; when the
   ADSP (started first, ~7 s) found no PD mapper it retried only after 50 s,

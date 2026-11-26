@@ -67,3 +67,44 @@ Whether ABL selects our DTB with these ids is **UNTESTED**.
 - `dtbs_check` (dtschema 2026.9): clean for `sm8475-xiaomi-diting.dtb`
 - `dt_binding_check` for `arm/qcom.yaml`, `phy/qcom,snps-eusb2-phy.yaml`: clean
 - kernelrelease check: `7.2.10-diting`
+
+## Configuration: every filesystem built in, with binfmt_misc (driver-fix, 2026-11-26)
+
+At the owner's request every filesystem of 7.2.10 is built into the kernel,
+not a module, and `BINFMT_MISC` is on; `kernel/config/diting.config` has the
+list, each group with its reason. What a mount needs is in `boot.img` alone.
+The option count went from 5017 to 5203 (built in 3450 → 3655, modules
+1567 → 1548); the image from 54.1 to 68.8 MB, in a 192 MiB partition.
+
+| Group | Built in |
+| --- | --- |
+| local filesystems that were modules | XFS, JFS, NILFS2, GFS2 (with DLM), OCFS2, exFAT, NTFS3, HFS, HFS+, HPFS, Minix, ROMFS, cramfs, EROFS (LZ4, LZMA, DEFLATE, ZSTD), UDF, ISO9660, QNX4, QNX6, UFS, FreeVxFS, BFS, ADFS, Affs, BeFS, EFS, OMFS, JFFS2, zonefs, FUSE (so virtiofs), btrfs, overlayfs, ubifs (with UBI), CUSE |
+| network | CIFS/SMB3 (SMB1 allowed), NFSv2 client, NFS server (v2–v4.2 with pNFS layouts), ksmbd, Ceph, AFS, Coda, OrangeFS, 9P (with its USB gadget transport) |
+| features of what was built in | fscrypt (with the inline crypto of the UFS host), fs-verity, f2fs compression (LZO, LZ4, LZ4HC, ZSTD), the squashfs decompression mode chosen at mount, tmpfs quotas |
+| characters sets | 48 NLS tables; UTF-8 is the default for FAT and exFAT and the NLS default (Chinese names on a USB stick) |
+| binary formats | `binfmt_misc`; ELF and scripts were on |
+
+Left out on purpose: `EXT2_FS` (deprecated; ext4 mounts ext2), `NTFS_FS` (the
+old read-only driver; NTFS3 answers to the same `ntfs` mount type), the write
+support of ADFS and UFS (marked DANGEROUS), FSCACHE and CACHEFILES (caching
+for network filesystems, not filesystems), the 9P RDMA and Xen transports
+(no InfiniBand, no Xen), the KUnit tests.
+
+Nine modules were modules before and are built in as a dependency demanded it
+(FUSE, the 9P stack, netfs, xts, ccm, arc4); `nvme-apple.ko` can only be a
+module here.
+
+Read on the phone on 2026-11-26 with this kernel: 21 images of 14 filesystems
+mounted read-only with both files identical, among them an NTFS3, an exFAT and
+an ISO9660 image with a Chinese file name, and every compression algorithm of
+squashfs and EROFS; a file with a Chinese name written into and read back from
+copies of vfat, exfat, NTFS3, f2fs and XFS images; squashfs with
+`threads=single|multi|percpu`; a `binfmt_misc` rule by magic handing a file
+to its interpreter, and the rule `systemd-binfmt` registers at boot.
+
+**AFS does not work in this build**: it binds an IPv6 RxRPC socket when it
+registers and fails at boot with `kAFS: failed to register: -97`.
+`AF_RXRPC_IPV6` and `RXKAD` are needed; they are not on the phone yet.
+
+The modules on the phone when built-ins change are another matter, met the
+same day: `ubuntu-diting/ci/KERNEL.md`, "When the configuration changes".

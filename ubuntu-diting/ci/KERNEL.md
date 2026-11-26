@@ -114,6 +114,44 @@ The modules of the build are not in either image: the ones a batch changed go
 to `/lib/modules/<release>/updates/` with `depmod -a` on the phone, or the
 package does it.
 
+## When the configuration changes: the modules on the phone
+
+The phone keeps the modules of the package it was installed with. They load
+with a new kernel as long as the configuration did not change: every module
+then has the same code (apart from the build id) and finds its symbols. A
+configuration change breaks that in two ways, both met on 2026-11-26 with the
+filesystems switched on (`release/driver-fix-batch3-fs/README.md`):
+
+- **Code compiled against another layout.** Options such as fscrypt, fs-verity
+  or zoned block devices add fields to `struct inode`, `struct super_block`
+  and `struct gendisk`. A module compiled without them holds the old offsets:
+  `btrfs.ko` from the package oopsed in `open_ctree()` on the new kernel, and
+  the superblock it left behind made every `sync()` wait forever (the phone
+  turned sluggish; only a restart at the kernel level ended it).
+- **A file left behind.** A module that became built in leaves its `.ko` on
+  the phone, and `modules.dep` still names it as a dependency. `modprobe`
+  loads dependencies first, the kernel refuses the file ("exports duplicate
+  symbol"), and the module that needs it is never loaded: Wi-Fi did not come
+  up because `mac80211.ko` depended on `libarc4.ko`, by then built in.
+
+Symbols are not enough of a check: both modules above passed it. Before a
+kernel whose configuration changed is put on the phone:
+
+1. In the container, `scripts/module-diff.py OLD_TREE NEW_TREE LIST` on the
+   module trees of the package on the phone and of the new build. It names
+   the modules whose code differs. Those either become built in (then the
+   next step covers them), or their new files go to `updates/`.
+2. On the phone, as root, `scripts/phone-modules-sync.sh METADATA_TARBALL`
+   with `modules.builtin`, `modules.builtin.modinfo` and `modules.order` out
+   of the new package. It moves the files of what is built in now away (a
+   tarball in `/var/tmp` keeps them), puts the new lists in place and runs
+   `depmod`; it ends by checking that no dependency points at a file that is
+   gone.
+
+When `sync()` itself hangs, `systemctl reboot` and `systemctl reboot -ff`
+hang with it: both sync. `sync -f /` syncs the one filesystem and still
+works; `echo b > /proc/sysrq-trigger` restarts without a sync.
+
 ## Measured on the first host
 
 Debian 13 x86_64, 15 threads, 26 GiB, docker 29 (2026-11-26): the image
