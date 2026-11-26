@@ -91,7 +91,8 @@ if [ -f "$rimg" ]; then
 	# status does not list them. They are linked against the libraries of
 	# the release; every package of those has to be installed in the image.
 	for b in ffmpeg ffprobe; do
-		t "/usr/local/bin/$b is in the image, mode 755" sh -c "debugfs -R 'stat /usr/local/bin/$b' '$rimg' 2>&1 | grep -q 'Type: regular.*Mode:  755'"
+		# debugfs prints the mode as a four-digit octal number: "Mode:  0755"
+		t "/usr/local/bin/$b is in the image, mode 755" sh -c "debugfs -R 'stat /usr/local/bin/$b' '$rimg' 2>&1 | grep -q 'Type: regular.*Mode:  *0755 '"
 	done
 	vf="$(mktemp -d)"
 	if debugfs -R "dump /usr/local/bin/ffmpeg $vf/ffmpeg" "$rimg" >/dev/null 2>&1 && [ -s "$vf/ffmpeg" ]; then
