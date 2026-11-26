@@ -102,9 +102,18 @@ copies of vfat, exfat, NTFS3, f2fs and XFS images; squashfs with
 `threads=single|multi|percpu`; a `binfmt_misc` rule by magic handing a file
 to its interpreter, and the rule `systemd-binfmt` registers at boot.
 
-**AFS does not work in this build**: it binds an IPv6 RxRPC socket when it
-registers and fails at boot with `kAFS: failed to register: -97`.
-`AF_RXRPC_IPV6` and `RXKAD` are needed; they are not on the phone yet.
+AFS binds an IPv6 RxRPC socket when it registers: in the first image of the
+round it failed at boot with `kAFS: failed to register: -97`. With
+`AF_RXRPC_IPV6` and `RXKAD` (its Kerberos security) built in it registers
+(`kAFS: Red Hat AFS client v0.1 registering`, `/proc/fs/afs/` there; read on
+the phone on 2026-11-26 11:25, the mount test unchanged). That made
+`CRYPTO_LIB_DES` built in too, so `libdes.ko` went the way of the 19: moved
+away by `scripts/phone-modules-sync.sh`.
+
+What `/proc/filesystems` lists with this kernel: 36 types a device can be
+mounted with (ext2 through ext4), and 41 without a device, among them
+binfmt_misc, cifs, smb3, nfs, nfs4, nfsd, afs, ceph, 9p, virtiofs, overlay,
+ubifs, ecryptfs, coda, pvfs2.
 
 The modules on the phone when built-ins change are another matter, met the
 same day: `ubuntu-diting/ci/KERNEL.md`, "When the configuration changes".

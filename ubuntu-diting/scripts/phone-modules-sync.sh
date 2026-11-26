@@ -37,23 +37,23 @@ done
 : >"$t/stale"
 n=0
 while read -r mod; do
-	[ -e "$K/$mod" ] && printf '/%s\n' "$K/$mod" >>"$t/stale" && n=$((n + 1))
+	[ -e "$K/$mod" ] && printf '%s\n' "${K#/}/$mod" >>"$t/stale" && n=$((n + 1))
 done <"$t/modules.builtin"
 [ "$n" -lt 200 ] || { echo "$(basename "$0"): $n modules became built in, more than this handles; install the package" >&2; exit 1; }
 
 echo "modules the new kernel has built in whose files are here: $n"
 [ "$n" -gt 0 ] && sed "s|^$K/||" "$t/stale" | tr '\n' ' ' && echo
 
+# Paths are relative to /, as tar wants them.
 lists=$(cd / && ls "$K"/modules.builtin "$K"/modules.builtin.modinfo "$K"/modules.order \
 	"$K"/modules.dep "$K"/modules.alias "$K"/modules.symbols "$K"/modules.devname \
-	"$K"/modules.softdep "$K"/modules.builtin.bin 2>/dev/null || true)
+	"$K"/modules.softdep "$K"/modules.builtin.bin 2>/dev/null | sed 's|^/||' || true)
 backup=/var/tmp/modules-tree-backup-$(date +%Y%m%d-%H%M%S).tgz
-# shellcheck disable=SC2086
+# shellcheck disable=SC2046
 tar -czf "$backup" -C / $(cat "$t/stale") $lists
 echo "backup: $backup ($(tar -tzf "$backup" | wc -l) entries)"
 
-# shellcheck disable=SC2046
-rm -f $(cat "$t/stale")
+sed 's|^|/|' "$t/stale" | xargs -r rm -f
 install -m 644 "$t/modules.builtin" "$t/modules.builtin.modinfo" "$t/modules.order" "$K/"
 depmod -a "$release"
 
