@@ -1,0 +1,29 @@
+From 66312e087d71a378b0190dbddc374f76c2c64527 Mon Sep 17 00:00:00 2001
+From: f <f@f>
+Date: Thu, 26 Nov 2026 21:53:16 +0800
+Subject: [PATCH] media: iris: free the controls of an instance whose open() is
+ refused
+
+iris_vdec_inst_init() has set the control handler up by the time
+iris_add_session() refuses the instance; the path that frees the two
+formats leaves the handler's own allocations behind. iris_close() frees
+it; do the same here.
+
+Local, not upstream. It follows the upstream patch that refuses open()
+at the session limit and shares its failure path.
+---
+ drivers/media/platform/qcom/iris/iris_vidc.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/media/platform/qcom/iris/iris_vidc.c b/drivers/media/platform/qcom/iris/iris_vidc.c
+index 6997593839..1c758e64cf 100644
+--- a/drivers/media/platform/qcom/iris/iris_vidc.c
++++ b/drivers/media/platform/qcom/iris/iris_vidc.c
+@@ -214,6 +214,7 @@ int iris_open(struct file *filp)
+ 	return 0;
+ 
+ fail_inst_deinit:
++	v4l2_ctrl_handler_free(&inst->ctrl_handler);
+ 	kfree(inst->fmt_src);
+ 	kfree(inst->fmt_dst);
+ fail_m2m_ctx_release:

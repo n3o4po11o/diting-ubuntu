@@ -1,0 +1,43 @@
+From dc6069256a92f1c81b617197f53db3e31a74895c Mon Sep 17 00:00:00 2001
+From: f <f@f>
+Date: Thu, 26 Nov 2026 20:35:07 +0800
+Subject: [PATCH] media: iris: SM8450: admit the sessions the firmware serves
+
+The core limit of the first iris batch is the vendor's MAX_MBPF,
+276480 macroblocks a frame: eight sessions of 4K.
+
+Read on the phone on 2026-11-26 (diting, vpu20_4v, VA-API through
+libva-v4l2-stateful): four sessions of 4K decode to their end, started
+together and paced at 30 frames a second. Above that figure, four of 4K
+with one of 1080p passed once, while three of 4K with five of 1080p,
+two with nine and one with thirteen, which take the same 138720
+macroblocks, ended in the firmware's fatal system error (0x5000003).
+The fifth session of 4K and more ended in that error in all nine runs,
+paced or not, started in the same instant or 0.5 and 2 seconds apart,
+with an intra-only stream and with a stream of P-frames. So the limit
+is what passed: 130560 macroblocks a frame, four sessions of 4K, which
+still admits one of 8K. With it in place the fifth decoder of 4K is
+refused (current session not supported(-12)), falls back to software
+in ffmpeg, and the four others decode to their end.
+
+Left as it is: thirteen and fourteen sessions of 1080p decode to
+their end, and so do sixteen started a second apart; sixteen started
+together end in the same error (twice of twice), fifteen ended in it in
+three runs, and seventeen started half a second apart ended in it in
+two of four. A limit on the frame size cannot tell these apart.
+---
+ drivers/media/platform/qcom/iris/iris_platform_vpu2.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/media/platform/qcom/iris/iris_platform_vpu2.c b/drivers/media/platform/qcom/iris/iris_platform_vpu2.c
+index e0708d618f..a6afd87c7a 100644
+--- a/drivers/media/platform/qcom/iris/iris_platform_vpu2.c
++++ b/drivers/media/platform/qcom/iris/iris_platform_vpu2.c
+@@ -186,6 +186,6 @@ const struct iris_platform_data sm8450_data = {
+ 	.requires_secure_arp = true,
+ 	.enc_drain_no_success = true,
+ 	.max_session_count = 16,
+-	.max_core_mbpf = ((8192 * 4320) / 256) * 2,
++	.max_core_mbpf = ((3840 * 2176) / 256) * 4,
+ 	.max_core_mbps = ((3840 * 2176) / 256) * 240,
+ };

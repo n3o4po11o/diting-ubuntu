@@ -1,0 +1,114 @@
+From 3f5087a15a728567cdfe915f9e9f25d94198535e Mon Sep 17 00:00:00 2001
+From: f <f@f>
+Date: Thu, 26 Nov 2026 21:53:17 +0800
+Subject: [PATCH] media: iris: give a buffer of an instance in error back as
+ queued
+
+Two warnings of videobuf2 came with every overload that ended in a
+firmware error.
+
+vb2_start_streaming(): "start_streaming() didn't call
+vb2_buffer_done(vb, VB2_BUF_STATE_QUEUED) but STATE_ERROR". An
+instance whose firmware session failed is in IRIS_INST_ERROR with its
+queues not marked, so a STREAMON that follows still hands its buffers
+to the driver, iris_vb2_buf_queue() completes them as failed, and the
+start_streaming() that fails then leaves them in the done list. Such a
+buffer now comes back as queued, which is what start_streaming() does
+with the rest: vb2 hands STREAMON its error with nothing left in the
+done list.
+
+vb2_buffer_done(): "vb->state != VB2_BUF_STATE_ACTIVE". When
+iris_vdec_qbuf() failed, iris_vb2_buf_queue() completed the buffer
+although it had just put it on the m2m ready queue, where
+iris_helper_buffers_done() found it a second time on STREAMOFF. The
+session now takes the buffer before it goes on the ready queue.
+
+Not changed on purpose: the queues of an instance in error are not
+marked, so a process with buffers queued learns of the error when it
+closes the session, as before. A first build of this batch did mark
+them (vb2_queue_error() from iris_inst_change_state()), and with it the
+overload below reset the SoC twice: seventeen decoders started half a
+second apart, the firmware's system error, then the node opened twenty
+times. The kernel log of the second, captured live, shows what broke,
+and that it was not the marking: an open() that arrives while the core
+is in IRIS_CORE_ERROR is refused by iris_core_init(), which on that
+path wrote IRIS_CORE_DEINIT over a core still powered on; the error
+handler's iris_core_deinit() then skipped the power-off, and its
+iris_core_init() powered on a core already on - "Unbalanced enable for
+IRQ 219" 9.6 ms after that open()'s "core init failed" - after which
+the firmware watchdog fired. The marking only made such an open more
+likely to fall in that window: without it the same sequence was run
+three times and did not reach it. The hole itself is closed by the
+patch after next.
+---
+ drivers/media/platform/qcom/iris/iris_vb2.c | 36 ++++++++++++++-------
+ 1 file changed, 25 insertions(+), 11 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/iris/iris_vb2.c b/drivers/media/platform/qcom/iris/iris_vb2.c
+index a2ea2d67f6..182fe54c32 100644
+--- a/drivers/media/platform/qcom/iris/iris_vb2.c
++++ b/drivers/media/platform/qcom/iris/iris_vb2.c
+@@ -296,8 +296,14 @@ void iris_vb2_buf_queue(struct vb2_buffer *vb2)
+ 
+ 	mutex_lock(&inst->lock);
+ 	if (inst->state == IRIS_INST_ERROR) {
+-		ret = -EBUSY;
+-		goto exit;
++		/*
++		 * vb2 hands the buffers over before it calls start_streaming(),
++		 * which fails on an instance in error: give them back as
++		 * queued, as start_streaming() does with the rest, not as
++		 * failed - vb2 warns about buffers left in its done list.
++		 */
++		v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_QUEUED);
++		goto unlock;
+ 	}
+ 
+ 	if (vbuf->field == V4L2_FIELD_ANY)
+@@ -307,7 +313,7 @@ void iris_vb2_buf_queue(struct vb2_buffer *vb2)
+ 
+ 	if (!vb2->planes[0].bytesused && V4L2_TYPE_IS_OUTPUT(vb2->type)) {
+ 		ret = -EINVAL;
+-		goto exit;
++		goto error;
+ 	}
+ 
+ 	if (!inst->last_buffer_dequeued && V4L2_TYPE_IS_CAPTURE(vb2->vb2_queue->type)) {
+@@ -325,21 +331,29 @@ void iris_vb2_buf_queue(struct vb2_buffer *vb2)
+ 				v4l2_m2m_mark_stopped(m2m_ctx);
+ 			}
+ 			inst->last_buffer_dequeued = true;
+-			goto exit;
++			goto unlock;
+ 		}
+ 	}
+ 
+-	v4l2_m2m_buf_queue(m2m_ctx, vbuf);
+-
++	/*
++	 * The session takes the buffer before it goes on the ready queue:
++	 * there it stays until the firmware returns it, and completing it
++	 * here after a failure would hand it to vb2 a second time when the
++	 * queue is flushed.
++	 */
+ 	if (inst->domain == DECODER)
+ 		ret = iris_vdec_qbuf(inst, vbuf);
+ 	else
+ 		ret = iris_venc_qbuf(inst, vbuf);
++	if (ret)
++		goto error;
+ 
+-exit:
+-	if (ret) {
+-		iris_inst_change_state(inst, IRIS_INST_ERROR);
+-		v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_ERROR);
+-	}
++	v4l2_m2m_buf_queue(m2m_ctx, vbuf);
++	goto unlock;
++
++error:
++	iris_inst_change_state(inst, IRIS_INST_ERROR);
++	v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_ERROR);
++unlock:
+ 	mutex_unlock(&inst->lock);
+ }

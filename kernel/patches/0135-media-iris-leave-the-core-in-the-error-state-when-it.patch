@@ -1,0 +1,65 @@
+From ff9efc2eab4804b0dd430744f7c70cbc20e1d661 Mon Sep 17 00:00:00 2001
+From: f <f@f>
+Date: Thu, 26 Nov 2026 23:03:53 +0800
+Subject: [PATCH] media: iris: leave the core in the error state when its init
+ is refused
+
+iris_core_init() returns -EINVAL when the core is in IRIS_CORE_ERROR,
+and went to the label that writes IRIS_CORE_DEINIT. Nothing was powered
+off on that path: a core in the error state is still on, with its IRQ
+enabled and its firmware loaded. The worker that recovers the core
+begins with iris_core_deinit(), which powers off unless the state is
+IRIS_CORE_DEINIT. So one open() in the window between the firmware's
+error and that worker made it skip the power-off, and the
+iris_core_init() that followed powered on a core that was on.
+
+Read on the phone on 2026-11-26 (diting), with the kernel log captured
+live: seventeen VA-API decoders started half a second apart, the
+firmware's system error (0x5000003), the recovery, a second system
+error 105 ms after the first, and 8 ms later the "core init failed" of
+an open(). The next run of the worker then reported "Unbalanced enable
+for IRQ 219" from iris_vpu_power_on(), 9.6 ms after that line: the
+power-off's disable_irq() had not run. The firmware watchdog fired
+2.2 s later, and opening the node twenty times more reset the SoC. The
+"Unbalanced enable for IRQ 218" from iris_open() read the same morning,
+after a system error, fits the same path.
+
+The state is now left as it is: the open() gets its -EINVAL, and the
+worker powers the core off before it brings it up again. Where nothing
+had scheduled the worker - the firmware answering the system init with
+an error, or not answering within a second - the refused open()
+schedules it, so that the core is recovered instead of staying on in
+the error state until a reboot.
+---
+ drivers/media/platform/qcom/iris/iris_core.c | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/media/platform/qcom/iris/iris_core.c b/drivers/media/platform/qcom/iris/iris_core.c
+index 56832df348..86f96b727a 100644
+--- a/drivers/media/platform/qcom/iris/iris_core.c
++++ b/drivers/media/platform/qcom/iris/iris_core.c
+@@ -4,6 +4,7 @@
+  */
+ 
+ #include <linux/pm_runtime.h>
++#include <linux/workqueue.h>
+ 
+ #include "iris_core.h"
+ #include "iris_firmware.h"
+@@ -58,8 +59,15 @@ int iris_core_init(struct iris_core *core)
+ 		ret = 0;
+ 		goto exit;
+ 	} else if (core->state == IRIS_CORE_ERROR) {
++		/*
++		 * The core is still powered on. Only the error handler
++		 * clears this state, and it powers the core off first.
++		 */
++		if (!delayed_work_pending(&core->sys_error_handler))
++			schedule_delayed_work(&core->sys_error_handler,
++					      msecs_to_jiffies(10));
+ 		ret = -EINVAL;
+-		goto error;
++		goto exit;
+ 	}
+ 
+ 	core->state = IRIS_CORE_INIT;

@@ -1,0 +1,37 @@
+From 29ceb6972f3376371de7346ddc5ae4d9e1b938b9 Mon Sep 17 00:00:00 2001
+From: Hungyu Lin <dennylin0707@gmail.com>
+Date: Thu, 4 Jun 2026 05:47:08 +0000
+Subject: [PATCH] media: iris: cancel sys error work on driver removal
+
+Cancel sys_error_handler before tearing down the driver.
+
+The delayed work may still be pending when iris_remove()
+runs. Since iris_core is allocated with devm_kzalloc(),
+allowing the work to execute after driver removal could
+result in accessing freed memory.
+
+Fixes: fb583a214337 ("media: iris: introduce host firmware interface with necessary hooks")
+Signed-off-by: Hungyu Lin <dennylin0707@gmail.com>
+Reviewed-by: Vishnu Reddy <busanna.reddy@oss.qualcomm.com>
+Reviewed-by: Dmitry Baryshkov <dmitry.baryshkov@oss.qualcomm.com>
+[bod: Fixed patch title]
+Signed-off-by: Bryan O'Donoghue <bod@kernel.org>
+(cherry picked from commit 4524809316482b64ff092afb7e7b0525ce137c75)
+(cherry picked from commit c076c8344169502d71cbcd9ff206346f2a463ba6)
+---
+ drivers/media/platform/qcom/iris/iris_probe.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/media/platform/qcom/iris/iris_probe.c b/drivers/media/platform/qcom/iris/iris_probe.c
+index 4af1497a21..5bc6ba21bf 100644
+--- a/drivers/media/platform/qcom/iris/iris_probe.c
++++ b/drivers/media/platform/qcom/iris/iris_probe.c
+@@ -201,6 +201,8 @@ static void iris_remove(struct platform_device *pdev)
+ 	if (!core)
+ 		return;
+ 
++	cancel_delayed_work_sync(&core->sys_error_handler);
++
+ 	iris_core_deinit(core);
+ 
+ 	video_unregister_device(core->vdev_dec);
