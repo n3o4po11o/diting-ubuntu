@@ -1,0 +1,58 @@
+From 04854437df76fa922de5a4bf82010e1077061e85 Mon Sep 17 00:00:00 2001
+From: gennro <gennro2004@gmail.com>
+Date: Sat, 31 Oct 2026 23:11:08 +0800
+Subject: [PATCH] power: supply: qcom_battmgr: don't wake the system on
+ charger updates
+
+The ADSP charger firmware sends BATTMGR_NOTIFICATION on every battery or
+USB change, many per minute while charging. Each one calls
+power_supply_changed(), whose pm_stay_awake() is a wakeup event: with the
+IPCC mailbox IRQ left unmasked in suspend (as it is upstream), s2idle
+resumes in full within minutes.
+
+Register the power supplies without a wakeup source, so the notifications
+are handled in suspend without waking the system. Masking the IPCC IRQ
+across suspend instead (the old 20-sm8550/0502) keeps the AP asleep but
+leaves the firmware's messages unanswered: about five minutes into s2idle
+the charger stops drawing power, and a device asleep on its charger runs
+the battery flat.
+
+Link: https://github.com/kettlelinux/kettlelinux/commit/6f00c5e5b457b95d69137b0c086de0785c6e7b52
+
+Rebase the insertion before the charge and OTG work initialization.
+Keep the notification decoding, fixed PD requests, PPS control and PM
+notifier unchanged; only the power-supply wakeup sources are disabled.
+
+Assisted-by: LLM
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+
+Origin: upstream commit 04854437df76 in the stable tree, after v7.2.10.
+The lines are the original; what follows them differs in 7.2.10
+(mutex_init() instead of the charge and OTG work).
+---
+ drivers/power/supply/qcom_battmgr.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/drivers/power/supply/qcom_battmgr.c b/drivers/power/supply/qcom_battmgr.c
+index b14dc01..3befe2b 100644
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -1723,6 +1723,15 @@ static int qcom_battmgr_probe(struct auxiliary_device *adev,
+ 	psy_cfg_supply.supplied_to = qcom_battmgr_battery;
+ 	psy_cfg_supply.num_supplicants = 1;
+ 
++	/*
++	 * The charger firmware sends a notification on every change, and
++	 * power_supply_changed() reports each one as a wakeup event, which
++	 * aborts suspend-to-idle within minutes. Those updates aren't a reason
++	 * to wake the system.
++	 */
++	psy_cfg.no_wakeup_source = true;
++	psy_cfg_supply.no_wakeup_source = true;
++
+ 	mutex_init(&battmgr->lock);
+ 	init_completion(&battmgr->ack);
+ 
+-- 
+2.54.0
+

@@ -1,0 +1,71 @@
+From 59413493369901ffc7bae4b2be707e2b0d511673 Mon Sep 17 00:00:00 2001
+From: yzddmr6 <46088090+yzddmr6@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 17:42:25 +0800
+Subject: [PATCH] serial: qcom-geni: keep the port interrupt masked
+ across system suspend
+
+uart_suspend_port() sets uport->suspended before it stops reception and
+shuts the port down, and qcom_geni_serial_isr() returns IRQ_NONE for a
+suspended port without acknowledging anything. An event raised in that
+window, such as the completion of the receive cancel issued by
+stop_rx(), leaves the level-triggered interrupt asserted until the
+spurious-interrupt detector disables it for good.
+
+On the Xiaomi Pad 6 Pro this is the Bluetooth UART: entering
+suspend-to-idle reported "irq 239: nobody cared" and Bluetooth stayed
+dead until reboot. Mask the line for the duration of the system suspend
+transition and unmask it after resume, when the pending events are
+handled by a running port.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/tty/serial/qcom_geni_serial.c | 19 ++++++++++++++++++-
+ 1 file changed, 18 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/tty/serial/qcom_geni_serial.c b/drivers/tty/serial/qcom_geni_serial.c
+index 88f9ba0..8208472 100644
+--- a/drivers/tty/serial/qcom_geni_serial.c
++++ b/drivers/tty/serial/qcom_geni_serial.c
+@@ -1979,6 +1979,7 @@ static int __maybe_unused qcom_geni_serial_runtime_resume(struct device *dev)
+ 
+ static int qcom_geni_serial_suspend(struct device *dev)
+ {
++	int ret;
+ 	struct qcom_geni_serial_port *port = dev_get_drvdata(dev);
+ 	struct uart_port *uport = &port->uport;
+ 	struct qcom_geni_private_data *private_data = uport->private_data;
+@@ -1991,7 +1992,22 @@ static int qcom_geni_serial_suspend(struct device *dev)
+ 		geni_icc_set_tag(&port->se, QCOM_ICC_TAG_ACTIVE_ONLY);
+ 		geni_icc_set_bw(&port->se);
+ 	}
+-	return uart_suspend_port(private_data->drv, uport);
++
++	/*
++	 * uart_suspend_port() marks the port suspended before it stops and
++	 * shuts it down, and the interrupt handler returns IRQ_NONE for a
++	 * suspended port without clearing anything. An event raised in that
++	 * window, such as the completion of the receive cancel, keeps this
++	 * level-triggered interrupt asserted until the spurious-interrupt
++	 * detector disables the line for good. Keep the line masked across
++	 * the transition; resume unmasks it once the port runs again, and the
++	 * pending events are handled then.
++	 */
++	disable_irq(uport->irq);
++	ret = uart_suspend_port(private_data->drv, uport);
++	if (ret)
++		enable_irq(uport->irq);
++	return ret;
+ }
+ 
+ static int qcom_geni_serial_resume(struct device *dev)
+@@ -2002,6 +2018,7 @@ static int qcom_geni_serial_resume(struct device *dev)
+ 	struct qcom_geni_private_data *private_data = uport->private_data;
+ 
+ 	ret = uart_resume_port(private_data->drv, uport);
++	enable_irq(uport->irq);
+ 	if (uart_console(uport)) {
+ 		geni_icc_set_tag(&port->se, QCOM_ICC_TAG_ALWAYS);
+ 		geni_icc_set_bw(&port->se);
+-- 
+2.54.0
+

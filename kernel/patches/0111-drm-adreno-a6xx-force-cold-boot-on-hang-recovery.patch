@@ -1,0 +1,49 @@
+From 355dd22d6a3190a22eea9764a60ac3e756959bec Mon Sep 17 00:00:00 2001
+From: yp <yp@e5debian>
+Date: Sun, 27 Sep 2026 19:08:02 +0800
+Subject: [PATCH] drm/adreno/a6xx: force cold boot on hang recovery
+
+On the recovery path the CX power domain has been cycled, which can
+clear the CM3's TCM even though the TCM-retention flag still reads
+"retained". Taking the warm-boot path in that case skips the firmware
+reload, so the CM3 boots from dead memory and never acks the host OOB
+handshake, leaving the GPU stuck in a hang -> recover -> hang loop.
+
+Force a cold boot (full firmware reload and re-init) whenever we are
+recovering from a hang.
+
+Origin: liuqin kernel commit 355dd22d6a31 (not upstream). Ported to this
+tree as it is; the only difference to the original is where the lines
+land, after the a8xx branch that 7.2 has in the cold-or-warm decision.
+a6xx_gpu->hung is set at the start of a6xx_recover() and cleared at its
+end, after the resume, so it is true on every resume that recovers.
+---
+ drivers/gpu/drm/msm/adreno/a6xx_gmu.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/drivers/gpu/drm/msm/adreno/a6xx_gmu.c b/drivers/gpu/drm/msm/adreno/a6xx_gmu.c
+index 4808604..45273d3 100644
+--- a/drivers/gpu/drm/msm/adreno/a6xx_gmu.c
++++ b/drivers/gpu/drm/msm/adreno/a6xx_gmu.c
+@@ -1376,6 +1376,18 @@ int a6xx_gmu_resume(struct a6xx_gpu *a6xx_gpu)
+ 		status = GMU_COLD_BOOT;
+ 	}
+ 
++	/*
++	 * On the recovery path the CX power domain has been cycled, which can
++	 * clear the CM3's TCM even though the TCM-retention flag read above
++	 * still reports "retained". Taking the warm-boot path in that case
++	 * skips the firmware reload, so the CM3 boots from dead memory and
++	 * never acks the host OOB handshake, leaving the GPU stuck in a
++	 * hang -> recover -> hang loop. Force a cold boot (full firmware
++	 * reload and re-init) whenever we are recovering from a hang.
++	 */
++	if (a6xx_gpu->hung)
++		status = GMU_COLD_BOOT;
++
+ 	ret = a6xx_gmu_fw_start(gmu, status);
+ 	if (ret)
+ 		goto disable_irq;
+-- 
+2.54.0
+

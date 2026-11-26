@@ -1,0 +1,93 @@
+From 787d0f7bf9669ab3a40e07cbb38e809e33e9d7c6 Mon Sep 17 00:00:00 2001
+From: seeker <gmx472@qq.com>
+Date: Sat, 14 Nov 2026 11:09:00 +0800
+Subject: [PATCH] power: supply: qcom_battmgr: correct the battery
+ telemetry units
+
+The Xiaomi firmware reports the remaining-charge counter in mAh, where
+the power supply ABI wants uAh: on the Xiaomi 12T Pro (diting) it reads
+3932 at 98 % of a 5000 mAh battery at 79 % state of health, and 4104 on
+a full one. Its POWER_NOW is a fixed placeholder, 10000000 whatever the
+current, even at zero, and its time estimates are not in the units of the
+ABI either (TIME_TO_EMPTY_AVG reads 65535 on a full battery).
+
+Convert the counter to uAh with overflow checking, and keep the firmware
+placeholder and the unverified time estimates out of the ABI, so that
+userspace derives the rate from measured charge, current and voltage.
+
+Origin: liuqin kernel commit 787d0f7bf966 (itself from Seeker0472's
+liuqin-nixos 1944c8474de8), which keys this on its QCOM_BATTMGR_SM8475
+variant and also adds charge_now and drops the three properties from the
+list. Ported to this tree's marker for the same firmware,
+bat_prop_constant_current; the properties stay listed and answer
+-ENODATA, as charge_full does here already.
+---
+ drivers/power/supply/qcom_battmgr.c | 31 +++++++++++++++++++++++++++--
+ 1 file changed, 29 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/power/supply/qcom_battmgr.c b/drivers/power/supply/qcom_battmgr.c
+index 6d65ecc..b14dc01 100644
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -16,6 +16,7 @@
+ #include <linux/soc/qcom/pdr.h>
+ #include <linux/soc/qcom/pmic_glink.h>
+ #include <linux/math.h>
++#include <linux/overflow.h>
+ #include <linux/units.h>
+ 
+ #define BATTMGR_CHEMISTRY_LEN	4
+@@ -539,6 +540,20 @@ out_unlock:
+ 	return ret;
+ }
+ 
++static int qcom_battmgr_bat_charge_counter(struct qcom_battmgr *battmgr,
++					   union power_supply_propval *val)
++{
++	s32 counter = battmgr->info.charge_count;
++
++	/* Xiaomi reports the counter in mAh; the ABI wants uAh */
++	if (battmgr->bat_prop_constant_current &&
++	    check_mul_overflow(counter, MILLI, &counter))
++		return -ERANGE;
++
++	val->intval = counter;
++	return 0;
++}
++
+ static int qcom_battmgr_bat_get_property(struct power_supply *psy,
+ 					 enum power_supply_property psp,
+ 					 union power_supply_propval *val)
+@@ -550,6 +565,19 @@ static int qcom_battmgr_bat_get_property(struct power_supply *psy,
+ 	if (!battmgr->service_up)
+ 		return -EAGAIN;
+ 
++	/*
++	 * What the Xiaomi firmware answers for these is not a measurement in
++	 * the units of the ABI: POWER_NOW reads 10000000 whatever the current,
++	 * even at zero, and TIME_TO_EMPTY_AVG reads 65535 on a full battery.
++	 * With them absent, userspace takes the rate from VOLTAGE_NOW and
++	 * CURRENT_NOW.
++	 */
++	if (battmgr->bat_prop_constant_current &&
++	    (psp == POWER_SUPPLY_PROP_POWER_NOW ||
++	     psp == POWER_SUPPLY_PROP_TIME_TO_EMPTY_AVG ||
++	     psp == POWER_SUPPLY_PROP_TIME_TO_FULL_AVG))
++		return -ENODATA;
++
+ 	if (battmgr->variant == QCOM_BATTMGR_SC8280XP ||
+ 	    battmgr->variant == QCOM_BATTMGR_X1E80100)
+ 		ret = qcom_battmgr_bat_sc8280xp_update(battmgr, psp);
+@@ -616,8 +644,7 @@ static int qcom_battmgr_bat_get_property(struct power_supply *psy,
+ 		val->intval = battmgr->status.capacity;
+ 		break;
+ 	case POWER_SUPPLY_PROP_CHARGE_COUNTER:
+-		val->intval = battmgr->info.charge_count;
+-		break;
++		return qcom_battmgr_bat_charge_counter(battmgr, val);
+ 	case POWER_SUPPLY_PROP_ENERGY_FULL_DESIGN:
+ 		if (unit != QCOM_BATTMGR_UNIT_mWh)
+ 			return -ENODATA;
+-- 
+2.54.0
+
