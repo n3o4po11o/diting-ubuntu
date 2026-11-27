@@ -1,3 +1,12 @@
+qcom-va-driver (1.1.1+gitee8622c-0diting4) resolute; urgency=medium
+
+  * patches/0003: a millisecond between a key frame request and the frame.
+    Once in some hundreds of requests the firmware made the requested frame a
+    P picture and the next one the IDR; with the wait, none in 10,000
+    (docs/VIDEO_ENCODE.md). tests/encoder/async-dump is the test for it.
+
+ -- ubuntu-diting local build <ubuntu-diting@localhost>  Fri, 27 Nov 2026 07:12:00 +0000
+
 qcom-va-driver (1.1.1+gitee8622c-0diting3) resolute; urgency=medium
 
   * patches/0002: a new bit rate and frame rate is taken while the session

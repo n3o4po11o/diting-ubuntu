@@ -1,0 +1,402 @@
+From 0df7a469fae7eb8de1099c3bd50a56942d95dbcb Mon Sep 17 00:00:00 2001
+From: f <f@f>
+Date: Fri, 27 Nov 2026 15:12:00 +0800
+Subject: [PATCH] encoder: wait a millisecond between a key frame request and
+ the frame
+
+The key frame is asked for with V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME, a
+property on the session, and the frame is queued as the next buffer, the
+two back to back. That was usually enough. On the Xiaomi 12T Pro (SM8475,
+firmware vpu20_4v.mbn, kernel with the control) it was not always: in
+five sessions of about 2700 requests the firmware encoded the requested
+frame as an ordinary P picture and made the next one the IDR, with SPS
+and PPS. A stream then differs from another run of the same frames at
+that key frame and the three after it, and nothing else.
+
+That is how it was found: upstream's async test (the same frames encoded
+waiting for every frame and with 8 queued must be one bitstream) failed
+in three of 80 runs with a driver from this tree before this patch, and
+in two of 40 with the driver as upstream ships it, so it comes with the
+firmware and the control, not with the patches of this tree. It failed in
+sessions that wait for every frame, so the queue depth is not it either.
+
+The kernel writes the property and the buffer to one command queue, in
+order, and does not wait for the firmware to take a property; a pause on
+our side is what there is. With a millisecond in between: 500 rounds of
+tests/encoder/async-dump, four sessions with five requests each, 10,000
+requests, not one; in the 55 rounds before, at the same rate, 18 were
+due.
+
+tests/encoder/async-dump.cpp is the test that caught it: four encodes of
+the same frames a round, against each other, until two differ.
+---
+ src/encoder.cpp              |  14 +-
+ tests/encoder/async-dump.cpp | 303 +++++++++++++++++++++++++++++++++++
+ tests/encoder/meson.build    |   8 +
+ 3 files changed, 324 insertions(+), 1 deletion(-)
+ create mode 100644 tests/encoder/async-dump.cpp
+
+diff --git a/src/encoder.cpp b/src/encoder.cpp
+index e213e79..c8b12ad 100644
+--- a/src/encoder.cpp
++++ b/src/encoder.cpp
+@@ -10,6 +10,8 @@
+ #include <cerrno>
+ #include <limits>
+ #include <array>
++#include <chrono>
++#include <thread>
+ 
+ namespace irisva {
+ namespace {
+@@ -896,8 +898,18 @@ std::shared_ptr<EncodeTask> Encoder::encode(const EncodeSettings &s, const Encod
+                       qp);
+             e.current_qp = qp;
+         }
+-        if (intra && e.token)
++        if (intra && e.token) {
+             e.control(V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME, 0);
++            // Give the firmware a moment before the frame follows. The request
++            // is a property on the session and the frame goes as the next
++            // buffer, the two back to back; that is usually enough, but on
++            // SM8475 once in some hundreds of requests the firmware encoded
++            // the frame as a P picture and made the next one the IDR (a stream
++            // that differs from another run of the same frames at one key
++            // frame). With a millisecond in between it did not in 500 rounds
++            // of tests/encoder/async-dump, 5000 requests.
++            std::this_thread::sleep_for(std::chrono::milliseconds(1));
++        }
+         QueueBuffer q(OUTPUT, index, e.import);
+         if (e.import)
+             q.plane.m.fd = memory->fd;
+diff --git a/tests/encoder/async-dump.cpp b/tests/encoder/async-dump.cpp
+new file mode 100644
+index 0000000..d264236
+--- /dev/null
++++ b/tests/encoder/async-dump.cpp
+@@ -0,0 +1,303 @@
++// SPDX-License-Identifier: MIT
++// Board test: c++ -std=c++17 -O2 tests/encoder/async-dump.cpp -lva -lva-drm -o async-dump
++// Usage: async-dump OUTPUT_DIRECTORY [rounds] [--hevc]
++// The encoder session of async.cpp - 640x480, CQP, QP 24 or 28 in blocks of 23
++// frames, an IDR every 17 frames - encoded four ways in every round: waiting
++// for every frame, twice (A, B); with the key frames asked for as non-IDR I
++// pictures, which the driver turns into IDR (C); and with 8 frames queued (D).
++// The four must be the same bitstream, as two of async.cpp's checks require.
++// The rounds go on until two of them differ or they run out. When they
++// differ, both are written (<name>.h264), with the bytes of every frame in
++// frame-sizes.txt and the first difference in first-difference.txt, and the
++// tool exits 1. The output directory has to exist.
++//
++// What it caught on the Xiaomi 12T Pro (SM8475, firmware vpu20_4v.mbn) on
++// 2026-11-27, before the driver waited a millisecond between a key frame
++// request and the frame: in three sessions of some thousands of requests the
++// requested frame came out as a P picture and the next one as the IDR, the
++// streams differing in those frames alone. With the wait: 500 rounds, none.
++#include <va/va.h>
++#include <va/va_drm.h>
++#include <va/va_enc_h264.h>
++#include <va/va_enc_hevc.h>
++#include <fcntl.h>
++#include <unistd.h>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <string>
++#include <vector>
++
++namespace {
++bool hevc = false;
++constexpr unsigned count = 12, width = 640, height = 480, frames = 96;
++
++void expect(VAStatus got, VAStatus wanted = VA_STATUS_SUCCESS) {
++    if (got != wanted) {
++        std::fprintf(stderr, "Expected %s, got %s\n", vaErrorStr(wanted), vaErrorStr(got));
++        std::exit(2);
++    }
++}
++void require(bool value, const char *message) {
++    if (!value) {
++        std::fprintf(stderr, "%s\n", message);
++        std::exit(2);
++    }
++}
++
++struct Session {
++    VADisplay display;
++    VAConfigID config;
++    VAContextID context;
++    VASurfaceID inputs[count], recon[count];
++    VABufferID coded[count];
++    explicit Session(VADisplay d) : display(d) {
++        VAConfigAttrib attr{VAConfigAttribRateControl, VA_RC_CQP};
++        expect(vaCreateConfig(d, hevc ? VAProfileHEVCMain : VAProfileH264High, VAEntrypointEncSlice,
++                              &attr, 1, &config));
++        expect(vaCreateSurfaces(d, VA_RT_FORMAT_YUV420, width, height, inputs, count, nullptr, 0));
++        expect(vaCreateSurfaces(d, VA_RT_FORMAT_YUV420, width, height, recon, count, nullptr, 0));
++        expect(vaCreateContext(d, config, width, height, VA_PROGRESSIVE, inputs, count, &context));
++        VAImageFormat format{};
++        format.fourcc = VA_FOURCC_NV12;
++        format.byte_order = VA_LSB_FIRST;
++        format.bits_per_pixel = 12;
++        VAImage image;
++        expect(vaCreateImage(d, &format, width, height, &image));
++        for (unsigned i = 0; i < count; ++i) {
++            void *data;
++            expect(vaMapBuffer(d, image.buf, &data));
++            std::memset(data, 128, image.data_size);
++            for (unsigned y = 0; y < height; ++y)
++                for (unsigned x = 0; x < width; ++x)
++                    static_cast<unsigned char *>(
++                        data)[image.offsets[0] + y * image.pitches[0] + x] =
++                        16 + ((x / 8 + y / 8 + i * 7) % 200);
++            expect(vaUnmapBuffer(d, image.buf));
++            expect(
++                vaPutImage(d, inputs[i], image.image_id, 0, 0, width, height, 0, 0, width, height));
++            expect(vaCreateBuffer(d, context, VAEncCodedBufferType, width * height * 3, 1, nullptr,
++                                  &coded[i]));
++        }
++        expect(vaDestroyImage(d, image.image_id));
++    }
++    ~Session() {
++        if (context != VA_INVALID_ID)
++            vaDestroyContext(display, context);
++        for (auto id : coded)
++            if (id != VA_INVALID_ID)
++                vaDestroyBuffer(display, id);
++        for (auto id : inputs)
++            if (id != VA_INVALID_SURFACE)
++                vaDestroySurfaces(display, &id, 1);
++        vaDestroySurfaces(display, recon, count);
++        vaDestroyConfig(display, config);
++    }
++    void submit(unsigned frame, bool non_idr = false) {
++        unsigned i = frame % count;
++        VAEncPictureParameterBufferH264 pic{};
++        VAEncSliceParameterBufferH264 slice{};
++        VAEncPictureParameterBufferHEVC hp{};
++        VAEncSliceParameterBufferHEVC sl{};
++        const bool idr = frame % 17 == 0;
++        VABufferID parameters[3];
++        if (hevc) {
++            VAEncSequenceParameterBufferHEVC hs{};
++            hs.general_profile_idc = 1;
++            hs.general_level_idc = 93;
++            hs.pic_width_in_luma_samples = width;
++            hs.pic_height_in_luma_samples = height;
++            hs.seq_fields.bits.chroma_format_idc = 1;
++            hs.log2_diff_max_min_luma_coding_block_size = 2;
++            hs.ip_period = 1;
++            hp.decoded_curr_pic.picture_id = recon[i];
++            hp.coded_buf = coded[i];
++            hp.pic_init_qp = (frame / 23) % 2 ? 28 : 24;
++            hp.pic_fields.bits.idr_pic_flag = idr && !non_idr;
++            hp.pic_fields.bits.coding_type = idr ? 1 : 2;
++            hp.pic_fields.bits.reference_pic_flag = 1;
++            sl.num_ctu_in_slice = (width + 31) / 32 * ((height + 31) / 32);
++            sl.slice_type = idr ? 2 : 1;
++            sl.ref_pic_list0[0].picture_id = recon[(i + count - 1) % count];
++            sl.slice_fields.bits.last_slice_of_pic_flag = 1;
++            sl.slice_fields.bits.slice_loop_filter_across_slices_enabled_flag = 1;
++            expect(vaCreateBuffer(display, context, VAEncSequenceParameterBufferType, sizeof(hs), 1,
++                                  &hs, &parameters[0]));
++            expect(vaCreateBuffer(display, context, VAEncPictureParameterBufferType, sizeof(hp), 1,
++                                  &hp, &parameters[1]));
++            expect(vaCreateBuffer(display, context, VAEncSliceParameterBufferType, sizeof(sl), 1, &sl,
++                                  &parameters[2]));
++        } else {
++            VAEncSequenceParameterBufferH264 seq{};
++            seq.level_idc = 31;
++            seq.picture_width_in_mbs = width / 16;
++            seq.picture_height_in_mbs = height / 16;
++            seq.seq_fields.bits.frame_mbs_only_flag = 1;
++            seq.seq_fields.bits.chroma_format_idc = 1;
++            seq.ip_period = 1;
++            seq.intra_period = seq.intra_idr_period = 17;
++            seq.max_num_ref_frames = 1;
++            pic.CurrPic.picture_id = recon[i];
++            pic.coded_buf = coded[i];
++            pic.pic_init_qp = (frame / 23) % 2 ? 28 : 24;
++            pic.pic_fields.bits.idr_pic_flag = idr && !non_idr;
++            pic.pic_fields.bits.reference_pic_flag = 1;
++            pic.pic_fields.bits.entropy_coding_mode_flag = 1;
++            slice.num_macroblocks = width / 16 * (height / 16);
++            slice.slice_type = idr ? 2 : 0;
++            slice.macroblock_info = VA_INVALID_ID;
++            slice.RefPicList0[0].picture_id = recon[(i + count - 1) % count];
++            expect(vaCreateBuffer(display, context, VAEncSequenceParameterBufferType, sizeof(seq),
++                                  1, &seq, &parameters[0]));
++            expect(vaCreateBuffer(display, context, VAEncPictureParameterBufferType, sizeof(pic), 1,
++                                  &pic, &parameters[1]));
++            expect(vaCreateBuffer(display, context, VAEncSliceParameterBufferType, sizeof(slice), 1,
++                                  &slice, &parameters[2]));
++        }
++        expect(vaBeginPicture(display, context, inputs[i]));
++        expect(vaRenderPicture(display, context, parameters, 3));
++        expect(vaEndPicture(display, context));
++        for (auto id : parameters)
++            expect(vaDestroyBuffer(display, id));
++    }
++    void collect(unsigned frame, std::vector<unsigned char> &stream, std::vector<size_t> &sizes) {
++        unsigned i = frame % count;
++        expect(vaSyncBuffer(display, coded[i], VA_TIMEOUT_INFINITE));
++        void *data;
++        expect(vaMapBuffer(display, coded[i], &data));
++        auto *seg = static_cast<VACodedBufferSegment *>(data);
++        require(seg->size && seg->buf && !seg->next && !seg->status, "invalid coded segment");
++        auto *bytes = static_cast<unsigned char *>(seg->buf);
++        stream.insert(stream.end(), bytes, bytes + seg->size);
++        sizes.push_back(seg->size);
++        expect(vaUnmapBuffer(display, coded[i]));
++    }
++};
++
++struct Streams {
++    std::vector<unsigned char> a, b, c, d;
++    std::vector<size_t> a_sizes, b_sizes, c_sizes, d_sizes;
++};
++void encode(VADisplay d, unsigned depth, bool non_idr, std::vector<unsigned char> &stream,
++            std::vector<size_t> &sizes) {
++    Session session(d);
++    stream.clear();
++    sizes.clear();
++    for (unsigned i = 0; i < frames; ++i) {
++        if (i >= depth)
++            session.collect(i - depth, stream, sizes);
++        session.submit(i, non_idr && i);
++    }
++    for (unsigned i = frames - depth; i < frames; ++i)
++        session.collect(i, stream, sizes);
++}
++
++void write(const char *path, const std::vector<unsigned char> &stream) {
++    FILE *f = std::fopen(path, "wb");
++    require(f && std::fwrite(stream.data(), 1, stream.size(), f) == stream.size(), "write");
++    std::fclose(f);
++}
++
++// The start codes of a stream: where each NAL begins and its type.
++std::vector<std::pair<size_t, int>> nals(const std::vector<unsigned char> &s) {
++    std::vector<std::pair<size_t, int>> out;
++    for (size_t i = 0; i + 3 < s.size(); ++i)
++        if (!s[i] && !s[i + 1] && s[i + 2] == 1 && (i == 0 || s[i - 1]))
++            out.emplace_back(i, s[i + 3] & 0x1f);
++    return out;
++}
++} // namespace
++
++int main(int argc, char **argv) {
++    unsigned rounds = 30;
++    for (int i = 2; i < argc; ++i) {
++        if (!std::strcmp(argv[i], "--hevc"))
++            hevc = true;
++        else
++            rounds = std::atoi(argv[i]);
++    }
++    if (argc < 2 || rounds < 1)
++        return 2;
++    int fd = open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC);
++    require(fd >= 0, "open the render node");
++    VADisplay display = vaGetDisplayDRM(fd);
++    int major, minor;
++    expect(vaInitialize(display, &major, &minor));
++    for (unsigned round = 1; round <= rounds; ++round) {
++        Streams s;
++        encode(display, 1, false, s.a, s.a_sizes);
++        encode(display, 1, false, s.b, s.b_sizes);
++        encode(display, 1, true, s.c, s.c_sizes);
++        encode(display, 8, false, s.d, s.d_sizes);
++        // A against each of the others, then B against C and D
++        const std::pair<const char *, const char *> pairs[] = {
++            {"A", "B"}, {"A", "C"}, {"A", "D"}, {"B", "C"}, {"B", "D"}, {"C", "D"}};
++        const std::vector<unsigned char> *stream[4] = {&s.a, &s.b, &s.c, &s.d};
++        const std::vector<size_t> *sizes[4] = {&s.a_sizes, &s.b_sizes, &s.c_sizes, &s.d_sizes};
++        for (const auto &pair : pairs) {
++            const unsigned x = pair.first[0] - 'A', y = pair.second[0] - 'A';
++            if (*stream[x] == *stream[y])
++                continue;
++            const auto &left = *stream[x];
++            const auto &right = *stream[y];
++            std::printf("round %u: %s and %s differ (%zu and %zu bytes)\n", round, pair.first,
++                        pair.second, left.size(), right.size());
++            std::printf("sizes: A %zu, B %zu, C %zu, D %zu\n", s.a.size(), s.b.size(), s.c.size(),
++                        s.d.size());
++            unsigned differing = 0, first = frames;
++            for (unsigned i = 0; i < frames; ++i)
++                if ((*sizes[x])[i] != (*sizes[y])[i]) {
++                    ++differing;
++                    if (first == frames)
++                        first = i;
++                }
++            std::printf("frames whose size differs: %u, the first is frame %u%s\n", differing, first,
++                        differing ? "" : " (none: same sizes, other bytes)");
++            const std::string dir = argv[1];
++            write((dir + "/" + pair.first + ".h264").c_str(), left);
++            write((dir + "/" + pair.second + ".h264").c_str(), right);
++            FILE *f = std::fopen((dir + "/frame-sizes.txt").c_str(), "w");
++            require(f, "open frame-sizes.txt");
++            std::fprintf(f, "frame  A  B  C  D  offset_A  offset_B  offset_C  offset_D   (A, B: wait for every frame; C: non-IDR I requests; D: 8 queued)\n");
++            size_t offset[4] = {};
++            for (unsigned i = 0; i < frames; ++i) {
++                const size_t row[4] = {(*sizes[0])[i], (*sizes[1])[i], (*sizes[2])[i], (*sizes[3])[i]};
++                std::fprintf(f, "%u %zu %zu %zu %zu %zu %zu %zu %zu%s\n", i, row[0], row[1], row[2], row[3],
++                             offset[0], offset[1], offset[2], offset[3],
++                             row[0] != row[1] || row[0] != row[2] || row[0] != row[3] ? "  <--" : "");
++                for (unsigned k = 0; k < 4; ++k)
++                    offset[k] += row[k];
++            }
++            std::fclose(f);
++            size_t at = 0;
++            while (at < left.size() && at < right.size() && left[at] == right[at])
++                ++at;
++            std::printf("the first byte that differs is at offset %zu\n", at);
++            f = std::fopen((dir + "/first-difference.txt").c_str(), "w");
++            require(f, "open first-difference.txt");
++            std::fprintf(f, "%s against %s, offset %zu\n", pair.first, pair.second, at);
++            for (size_t i = at >= 32 ? at - 32 : 0; i < at + 64 && i < left.size(); ++i)
++                std::fprintf(f, "%06zx  %s %02x  %s %02x %s\n", i, pair.first, left[i], pair.second,
++                             i < right.size() ? right[i] : 0,
++                             i < right.size() && left[i] != right[i] ? "<--" : "");
++            std::fclose(f);
++            for (unsigned k : {x, y}) {
++                const auto n = nals(*stream[k]);
++                std::printf("%c: %zu NALs; from the difference on:", 'A' + k, n.size());
++                unsigned shown = 0;
++                for (const auto &[o, type] : n)
++                    if (o + 512 >= at && shown++ < 12)
++                        std::printf(" [%zu:%d]", o, type);
++                std::printf("\n");
++            }
++            std::fflush(stdout);
++            return 1;
++        }
++        if (round % 10 == 0) {
++            std::printf("%u rounds: all four the same every time\n", round);
++            std::fflush(stdout);
++        }
++    }
++    std::printf("%u rounds: all four the same every time\n", rounds);
++    return 0;
++}
+diff --git a/tests/encoder/meson.build b/tests/encoder/meson.build
+index ce50467..6301311 100644
+--- a/tests/encoder/meson.build
++++ b/tests/encoder/meson.build
+@@ -43,6 +43,14 @@ executable(
+   install_dir: tests_install_dir / 'encoder',
+ )
+ 
++executable(
++  'async-dump',
++  'async-dump.cpp',
++  dependencies: [va, va_drm],
++  install: true,
++  install_dir: tests_install_dir / 'encoder',
++)
++
+ shared_module(
+   'reject-coherent',
+   'reject-coherent.c',
+-- 
+2.54.0
+
