@@ -371,6 +371,26 @@ Which driver a browser decodes with, since 2026-11-28:
   29-30 frames a second with no frame dropped and the picture that of a
   software decode - 10-bit 4K included, which `libva-v4l2-stateful` cannot.
   With the old driver through the same deb, H.264 decoded in hardware too.
+  The on-screen keyboard works with it: a Wayland protocol trace of one
+  launch from phosh (2026-11-28 01:51) has the window take keyboard focus
+  and Chromium enable and disable text-input-v3 as fields take and lose it.
+  `--enable-wayland-ime` is not needed: this version enables the Wayland
+  input method by default (`IsImeEnabled()` in
+  `ui/ozone/platform/wayland/host/wayland_input_method_context.cc`).
+- **The first three launches of the deb from the desktop crashed**
+  (2026-11-28, 01:21-01:23); later ones from the same icon ran (01:40,
+  01:51). Each died about 1.3 s after start. The three dumps Chromium kept
+  (`~/.config/chromium/Crash Reports/pending`) are one crash: SIGSEGV at
+  address 0 in the browser process's main thread, in a task the GLib main
+  loop dispatches (`chromium+0x10ccd9cc`, called from `+0x10ccd908`). There
+  are no symbols to name it - the PPA ships no debug symbols - and it was
+  not reproduced: 25 launches from a shell, with and without the flags the
+  snap had, with a fresh profile and with the default one, under phosh's
+  environment and its activation token, under its file-descriptor limit,
+  and through `gio launch`, all ran. Left unexplained.
+  `liqin-study/scripts/minidump-peek.py` of the workspace reads such dumps
+  without symbols; copies of the three are in
+  `liqin-study/raw/vaenc-eval/default-driver-2026-11-28/crash-dumps/`.
 - **Snap Chromium** (158) stays on the old driver. A snap cannot read host
   libraries: `diting-chromium-vaapi` copies `v4l2_drv_video.so` into
   `~/snap/chromium/common/dri` at login and writes `~/.chromium-browser.init`
