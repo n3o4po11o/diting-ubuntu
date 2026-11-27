@@ -102,6 +102,14 @@ throttling), worked out 2026-11-21/24. Fixes are commits on the
   Mac, 115200; a root shell respawns from init-top.
   `diting.debug=hold` in `/etc/diting/cmdline` parks the boot for
   filesystem repair (`e2fsck -fy /dev/sda37` with PID 1 frozen).
+- Clock behind: the phone has no usable RTC, so the clock is only as good
+  as NTP, and `ntp.ubuntu.com` gets no answer on these networks
+  (2026-11-27). "Automatic Date & Time" in the settings cannot change
+  that. Device 0.7.37 gives systemd-timesyncd `ntp.aliyun.com` and
+  `cn.pool.ntp.org` after Ubuntu's servers. Until an image with it:
+  `/usr/lib/systemd/timesyncd.conf.d/10-diting-timesyncd.conf` from the
+  package, then `sudo systemctl restart systemd-timesyncd`
+  (`timedatectl` says `System clock synchronized: yes` about 40 s later).
 - Cellular: APN for China Telecom is `ctnet` (`sudo nmcli c add type
   gsm ifname '*' con-name mobile gsm.apn ctnet autoconnect yes`, or the
   Mobile data page of Cellular Settings, 2026-11-27); the

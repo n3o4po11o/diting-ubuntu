@@ -73,6 +73,14 @@ does not work. Details: `docs/KNOWN_ISSUES.md` in the source repository.
 
 - Connect to Wi-Fi in Settings. Updates: `sudo apt update && sudo apt upgrade`
   (Ubuntu packages; the kernel and device packages come from the release).
+- The clock: the phone has no clock of its own that survives a power off,
+  so the time comes from the network. Where Ubuntu's time servers get no
+  answer (as on the networks of China) the clock stays behind and HTTPS
+  fails. The image has systemd-timesyncd try two servers that answer there
+  after Ubuntu's (device 0.7.37); on an older image, put
+  `NTP=ntp.ubuntu.com ntp.aliyun.com cn.pool.ntp.org` under `[Time]` in a
+  file in `/etc/systemd/timesyncd.conf.d/` and restart
+  `systemd-timesyncd`.
 - Mobile data: set the APN in Settings → Mobile Network, or on the Mobile
   data page of the Cellular Settings app, or
   `nmcli c add type gsm ifname '*' con-name mobile gsm.apn <your-apn>`.

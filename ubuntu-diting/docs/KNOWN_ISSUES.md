@@ -692,7 +692,7 @@ Workaround (shipped as a note, not packaged): disable idle blanking —
 
 A proper fix needs panel/driver work on the dim path (patch 0015 territory).
 
-## The PMK8350 RTC: the AP cannot write it, and reading it at boot put the clock in 1970 (2026-11-21; the second half found and fixed 2026-11-26)
+## The PMK8350 RTC: the AP cannot write it, and reading it at boot put the clock in 1970 (2026-11-21; the second half found and fixed 2026-11-26; the third, NTP without an answer, 2026-11-27)
 
 The SPMI PMIC arbiter rejects every AP write to the RTC registers
 ("disallowed SPMI write to sid=0, addr=0x61xx"): allow-set-time makes
@@ -719,6 +719,35 @@ the change has systemd's "System time advanced" line at 3.4 s, no
 "setting system clock" line, and no entry stamped before 2026; the clock
 was 9 s behind until NTP, instead of 56 years. The RTC is still registered
 as rtc0, so wake alarms are as before.
+
+The third leg, found on 2026-11-27: NTP had no answer. The phone's clock
+was 26 minutes behind, and "Automatic Date & Time" in the settings made no
+difference, because it only starts and stops `systemd-timesyncd`, which
+was running: in the boot since the reinstall of 2026-11-26 it had timed
+out 91 times and never had a reply. Every request to the four addresses of
+`ntp.ubuntu.com` went unanswered, on the Wi-Fi the phone was on; the
+cellular path was not measured. A request of our own was answered by
+`ntp.aliyun.com` in 60 ms and by `cn.pool.ntp.org` in 11 ms, both with the
+same offset, +1580.9 s. The other servers tried were silent too
+(`pool.ntp.org`, `time.cloudflare.com`, and `ntp.tencent.com`). In the
+morning of 2026-11-26 Ubuntu's servers had still answered (245 s after
+boot, above), so it is the network and the hour. Without a reply the clock
+is what the clock file of the image said at the first boot, and nothing
+corrects it.
+
+Device 0.7.37 installs `/usr/lib/systemd/timesyncd.conf.d/10-diting-timesyncd.conf`:
+`NTP=ntp.ubuntu.com ntp.aliyun.com cn.pool.ntp.org`. systemd-timesyncd
+tries the servers in turn, so where Ubuntu's answer nothing changes, and
+where they do not it reaches one that does after their four timeouts.
+DEVICE-TESTED 2026-11-27: on the phone, with that file and nothing under
+`/etc/systemd/timesyncd.conf.d/`, four timeouts of 10 s, then "Contacted
+time server 203.107.6.88 (ntp.aliyun.com)", the clock stepped forward by
+26 min 20 s, equal to the Mac's to the second, `NTPSynchronized=yes`. The
+file was copied there by hand from the 0.7.37 deb: dpkg on the phone still
+says 0.7.36, as a deb upgrade runs `update-initramfs` and the hook that
+writes the boot images. The deb was built in the builder image on the
+build host; the kernel image has no `alsatplg`, so `make packages` does
+not run in its container.
 
 ## CN units: no audio - the ADSP's SPF never answers (2026-11-21, RESOLVED 2026-11-22)
 
@@ -1425,7 +1454,9 @@ and asked why, the modem patches being in place (2026-11-27). Nothing in
 the kernel, the modem or ModemManager was at fault: the rootfs had been
 installed again that evening, and `/etc/diting/modem-mode`, which no
 package carries ("Configuration the owner sets per phone", above), was
-gone with it. Times are the phone's clock, which runs 26 minutes behind.
+gone with it. Times are the phone's clock, which had had no NTP reply
+since the reinstall (the entry on the PMK8350 RTC): it was 26 minutes
+behind when measured the next day.
 
 - 19:30:39: the first boot of the new rootfs, the one after it from
   19:33:20. 19:31:45: `diting-modem-mode.service` skipped,

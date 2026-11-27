@@ -73,3 +73,5 @@ systemd/diting-modem-resume.service usr/lib/systemd/system
 src/diting-hardware-recovery usr/lib/diting
 systemd/diting-hardware-recovery.service usr/lib/systemd/system
 systemd/diting-always-online.service usr/lib/systemd/system
+# the phone has no usable RTC: NTP servers that also answer where ntp.ubuntu.com does not
+systemd/10-diting-timesyncd.conf usr/lib/systemd/timesyncd.conf.d
