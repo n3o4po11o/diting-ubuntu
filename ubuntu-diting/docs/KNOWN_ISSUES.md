@@ -605,7 +605,7 @@ Limits of `libva-v4l2-stateful`, which snap Chromium still uses:
 - Kernel r38 or later is required: earlier iris read past its timestamp
   metadata (0084) and could end decoding with a spurious EOS.
 
-### Screen sharing through the desktop portal crashes the portal backend: RustDesk cannot show this phone's screen (2026-11-27, OPEN)
+### Screen sharing through the desktop portal crashes the portal backend: RustDesk cannot show this phone's screen (2026-11-27; cause found 2026-11-28, PARKED)
 
 RustDesk 1.5.3 (`rustdesk-1.5.3-aarch64.deb` from the project's GitHub
 release, sha256 `fa85e8d3…82ae19`) was installed on the phone at the owner's
@@ -632,44 +632,74 @@ What the encoder side says (all on the phone):
 What stops it, in order. All of it is on the phone's desktop side; the kernel
 log had nothing from the video core through all of it.
 
-1. **The screen chooser segfaults.** `xdg-desktop-portal-wlr` (0.8.1-1) is the
-   only backend here that offers ScreenCast (`wlr.portal`, `UseIn=…phosh…`),
-   and it has no dialog of its own: it runs a chooser, the first being
-   `slurp -f 'Monitor: %o' -or`. `slurp` 1.6.0-1 maps its overlay and
-   segfaults on the compositor's first keyboard events (exit 139, run by hand,
-   and in the portal's log). The portal answers "User cancelled interaction"
-   and RustDesk reports "Wayland portal handshake failed:
-   wl-stage:select-sources:declined". Nothing is shown on the screen to
-   confirm, so no app on this phone can share the screen.
-2. **With the chooser bypassed the portal backend crashes when RustDesk
-   connects.** `chooser_type = none` in
-   `~/.config/xdg-desktop-portal-wlr/config` lets any app in the session
-   capture the screen unasked; it was set for the test and removed after.
-   The portal then grants a stream (node 93, 1356x610 logical), and when
-   RustDesk's `pipewiresrc` connects: `xdpw: unable to find format: 875713112`
-   (XR24, XRGB8888), `pipewire: failed to create xdpw buffer`, `Main process
-   exited … status=11/SEGV`, and a systemd restart. Seven crashes are logged
-   that evening. In the source (0.8.1, `screencast_common.c`
-   `xdpw_buffer_create`, `pipewire_screencast.c`
-   `pwr_handle_stream_add_buffer`) the negotiated PipeWire format is not in
-   the compositor's `wl_shm` format list the portal holds at that moment: it
-   destroys its own instance inside PipeWire's add-buffer callback and
-   returns with the buffer untouched, and the segfault follows from there.
-   Where XR24 came from and why the list lacks it was not settled: the
-   portal's list is built from the screencopy frame's `buffer` events rather
-   than from `wl_shm`, and the release build logs errors only. The
-   compositor's `wl_shm` list, read from slurp's protocol trace, has 16
-   formats, XB24 and AB24 among them. RustDesk is left with no source: its
-   probe reads a 0x0 stream, 23 s later it starts again and the session
-   manager links its stream to the first `Video/Source`, a camera (`pw.link:
-   (76.0.0 -> 92.0.0) … Buffer allocation failed`), and the Mac gives up after
-   30 s ("Connection closed: Timeout"). No frame reached the encoder: one
-   encoder session a connection, one frame in it, and that is the hwcodec
-   check.
-3. **`/dev/uinput` does not exist** (no module, not built in): the server
-   logs "Failed to create keyboard/mouse: No such file or directory". With the
-   fallback, xdo over XWayland, Wayland apps cannot be driven. Remote input
-   would not work even with a picture.
+1. **The screen chooser segfaulted (2026-11-27) and was not seen again
+   (2026-11-28).** `xdg-desktop-portal-wlr` (0.8.1-1) is the only backend
+   here that offers ScreenCast (`wlr.portal`, `UseIn=…phosh…`), and it has no
+   dialog of its own: it runs a chooser, the first being
+   `slurp -f 'Monitor: %o' -or`. That evening `slurp` 1.6.0-1 mapped its
+   overlay and segfaulted on the compositor's first keyboard events (exit
+   139, at least four times: from the portal and run by hand, each time after
+   RustDesk had opened its connection-manager window). The portal answered
+   "User cancelled interaction" and RustDesk reported "Wayland portal
+   handshake failed: wl-stage:select-sources:declined"; nothing was shown on
+   the screen to confirm. After the reboot of 04:02 it did not reproduce: the
+   archive's binary and a build of the same source, in portrait and in
+   landscape, all wait for the click (under gdb
+   `keyboard_handle_modifiers` is reached with a valid keymap). No patch was
+   written: there is nothing to test one against.
+2. **The portal backend crashes when a client takes the screen: the
+   compositor gives it no buffer format.** phoc 0.54 (wlroots 0.19.2) has
+   `ext-image-copy-capture-v1`, which the portal prefers ("wayland: using
+   ext_image_copy_capture"). The capture source's constraints come from the
+   output's swapchain
+   (`wlr_ext_image_capture_source_v1_set_constraints_from_swapchain`), and on
+   this machine they are empty. With the screen off, the usual state of a
+   phone, the output is disabled: phoc logs `Swapchain for output 'DSI-1'
+   failed test` at the moment the portal creates the session, and the source
+   is left with nothing. With the screen on (woken through uinput, `enabled`
+   read back from `/sys/class/drm`) no `shm_format` and no `dmabuf_format`
+   arrives either; why was not traced further (that path asks the GLES2
+   renderer, Mesa's msm driver, for a texture's read format and for its DRM
+   fd). The portal (0.8.1, and master the same: `xdpw_ext_ic_session_init`
+   does one roundtrip and does not look at what it got) answers Start with a
+   node anyway. With a client that takes system memory the negotiation then
+   yields nothing real: with RustDesk's `pipewiresrc` `format: 8, size: (1,
+   1)`, with `gst-launch-1.0` `format: 0, size: (0, 0)`. `xdpw_buffer_create`
+   finds none of it in its empty list and the portal dies two ways: "xdpw:
+   unable to find format: 875713112" then "pipewire: failed to create xdpw
+   buffer" and a segfault (0.8.1 destroys its own instance inside PipeWire's
+   add-buffer callback and returns; what follows reads the buffer), or
+   `Assertion 'format != DRM_FORMAT_INVALID' failed`. Seven crashes on
+   2026-11-27, more on the 28th ("restart counter is at 7"). RustDesk is left
+   with no source: its probe reads a 0x0 stream, 23 s later it starts again
+   and the session manager links its stream to the first `Video/Source`, a
+   camera (`pw.link: (76.0.0 -> 92.0.0) … Buffer allocation failed`), and the
+   client gives up after 30 s ("Connection closed: Timeout"). No frame
+   reached the encoder. **The old protocol works:** grim, which takes
+   `zwlr_screencopy_v1`, captured the lock screen through wl_shm in
+   XBGR8888, 1220x2712, in 340 ms (`grim-lockscreen-1220x2712.png`). The
+   portal has that backend too, and picks the new one only because the
+   compositor advertises it.
+3. **`/dev/uinput` did not exist** (no module, not built in): the server
+   logged "Failed to create keyboard/mouse: No such file or directory". With
+   the fallback, xdo over XWayland, Wayland apps cannot be driven. **Fixed
+   2026-11-28:** `CONFIG_INPUT_UINPUT=m` in `kernel/config/diting.config`;
+   `uinput.ko` from that build in `/lib/modules/7.2.10-diting/updates/` on the
+   phone, loaded with `modprobe uinput`. RustDesk's service then made its
+   devices ("UInput keyboard device created successfully"; `RustDesk UInput
+   Keyboard` and `mouce-library-fake-mouse` under
+   `/sys/devices/virtual/input`), and a power key press from a test device
+   woke the screen (`uinput-key.c`). It is not loaded at boot, as nothing
+   asks for it (no udev rule for it on this image): after a reboot it takes
+   `modprobe uinput`, until a `modules-load.d` entry is added.
+
+The portal's log level is a command-line option, `-l TRACE`
+(`XDPW_LOG_LEVEL` is not read): a drop-in with
+`ExecStart=/usr/libexec/xdg-desktop-portal-wlr -l TRACE -c <config>` and a
+config file holding `chooser_type = none` is the whole diagnosis. Both were
+set for it and removed after. The trace of the crash is
+`portal-wlr-trace-crash-display-off.txt` in
+`liuqin-study/raw/vaenc-eval/rustdesk-2026-11-28/` of the workspace.
 
 RustDesk's habits, for the next attempt:
 
@@ -684,8 +714,13 @@ RustDesk's habits, for the next attempt:
 - The unit's `ExecStop` is `pkill -f "rustdesk --"`: keep that string out of
   command lines that may be alive when the service stops. Drive the phone
   through scripts sent on stdin.
+- The capture session is created 0.4 s after the connection: wake the screen
+  before connecting, not after.
+- A session on the client ends when its window is closed, and the phone logs
+  "Connection closed: Reset by the peer". On 2026-11-28 the owner was at the
+  Mac, and every window the test opened there was closed within a second.
 
-Two things the test did to the phone, both undone:
+What the test did to the phone, all undone:
 
 - A portal request written by hand without `session_handle_token` aborts
   `xdg-desktop-portal` 1.21.1 (`xdp_session_initable_init`: `session->token
@@ -694,12 +729,31 @@ Two things the test did to the phone, both undone:
 - Reading the gadget's `UDC` attribute hangs in the kernel since the boot of
   21:12 (see "diting-hardware-recovery", below); one more `cat` was left in
   state D by a diagnostic that timed out on it.
+- `apt-get purge wlr-randr` at the end of the diagnosis removed
+  `budgie-desktop` and `budgie-desktop-environment` with it: `wlr-randr` was
+  not installed for the diagnosis, it is Budgie's dependency. Both were put
+  back in the versions dpkg had removed (10.10.2-1ubuntu4.1 and
+  0.24.16ubuntu0.1), and `apt-get -s autoremove` is empty again. The
+  conffiles of `budgie-desktop-environment` under `/etc` are the package's
+  defaults again. `phone-screencast-restore.sh` carries the warning. The
+  diagnosis's own packages were taken from apt's history, one by one.
 
-What it would take: `xdg-desktop-portal-wlr` that does not crash and
-negotiates a format it can make (or phoc offering the same formats on both
-paths), a chooser that works where slurp 1.6.0 does not, and uinput in the
-kernel. Until then RustDesk on this phone cannot show its screen, and the
-hardware encoder has been tried from ffmpeg and the driver's tests only.
+
+**Parked on 2026-11-28:** the owner is replacing the GUI and the OS, so the
+portal was not patched. What it would have taken, and what the next desktop
+needs for RustDesk: a ScreenCast backend whose capture works for a client that
+takes system memory (here: take the `zwlr_screencopy` backend when the ext
+session comes back without a format, and do not destroy the instance inside
+the add-buffer callback); uinput in the kernel; and the screen on, because
+wlroots does not capture a disabled output and nothing in phosh turns it on
+for a remote session. The hardware encoder itself has been tried from ffmpeg
+and the driver's tests only. Scripts, in `liuqin-study/scripts` of the
+workspace: `phone-screencast-probe.py` (asks the portal for the stream over
+D-Bus and reads it with `gst-launch-1.0`; needs `gstreamer1.0-tools`),
+`uinput-key.c` (built in the arm64 chroot), `phone-rustdesk-*.sh`,
+`phone-screencast-restore.sh`. Two draft scripts for rebuilding `slurp` and
+`xdg-desktop-portal-wlr` from the Ubuntu source with patches were never
+finished and are not in the tree: `uncommitted/` under that raw directory.
 
 ### Reboot can hang after the video codec was used
 

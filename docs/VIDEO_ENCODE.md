@@ -760,6 +760,21 @@ surface 的那条命令）：
 - 测完手机已恢复：免选择器的配置、调试日志、临时密码、IP 直连都撤了；RustDesk 留着，开机自启，
   没有固定密码。我弄崩过一次主 portal（手工调用漏了参数，断了 35 秒，已恢复）。
 
+**2026-11-28：按“修屏幕共享链路”做了一轮，查清了根因；随后机主决定更换 GUI 和操作系统，存档。**
+
+- **uinput 修好了**：内核配置加 `CONFIG_INPUT_UINPUT=m`，`uinput.ko` 放进手机的 `updates/`，RustDesk 的服务
+  建起了它的虚拟键鼠，经 uinput 按电源键能点亮屏幕。开机还不会自动加载（缺一条 `modules-load.d`）。
+- **portal 崩溃的根因**：合成器（phoc / wlroots 0.19.2）优先被用的新抓屏协议 `ext-image-copy-capture` 在
+  这台机器上不给任何格式——屏幕灭着时输出被禁用，交换链测试失败；屏幕亮着时同样没有格式（没有再往下
+  追）。portal 只等一次往返、不看结果就把节点交给客户端，协商出空格式后在回调里销毁自己，崩溃。**旧协议
+  是好的**：`grim` 用 `zwlr_screencopy` 截到了锁屏（1220×2712，340 毫秒）。portal 里两条路都有，补丁的
+  写法已经定了（新协议拿不到格式就回退到旧协议，并且不在回调里销毁自己），没写。
+- **slurp**：手机重启后复现不了（原版、自编、横竖屏都正常等着点选），没写补丁，如实记录。
+- 所以 **RustDesk 的真实会话仍然没有跑通**，硬件编码器还是只有 ffmpeg 和驱动测试验证过。给新桌面攒下的
+  东西：一个能对“要系统内存帧的客户端”工作的屏幕共享后端、uinput、以及亮着的屏幕（wlroots 不抓被禁用的
+  输出）。细节、脚本和原始日志见 `ubuntu-diting/docs/KNOWN_ISSUES.md` 的 “Screen sharing through the
+  desktop portal” 一节。
+
 ### 12.9 2026-11-28：默认驱动换成 qcom-va-driver，Chromium 换成 deb
 
 **机主的决定**：以后不用 `LIBVA_DRIVER_NAME=qcom`，默认的 `msm` 就是这个驱动（方案 A）。接着
