@@ -610,6 +610,12 @@ on the test phone now sets 10 s (applies only after systemd-sysctl).
 
 ## Configuration the owner sets per phone (not packaged)
 
+Cellular Settings (`packages/cellular-settings`, 2026-11-27) does all of
+this on the phone: its Mobile data page makes the connection, its Network
+page sets the mode and the preference, and "Keep for next boot" writes the
+file, without a password from the desktop session. What it does underneath
+is this:
+
 - Mobile data APN: a NetworkManager `gsm` connection, e.g.
   `nmcli c add type gsm ifname '*' con-name mobile gsm.apn <apn>`. Odido uses
   `smartsites.t-mobile`. Wi-Fi keeps the lower route metric. Give the
@@ -623,6 +629,9 @@ on the test phone now sets 10 s (applies only after systemd-sysctl).
 - Same file, for an LTE-only carrier such as China Telecom:
   `usage="data"` and `service_domain="ps-only"` (`diting-nas-pref` at boot;
   2026-11-25, below). Leave them out where 2G/3G calls and SMS must work.
+- **None of this survives a rootfs installed again**, and the loss of the
+  file cost an evening of drops on 2026-11-26 (last section): after a
+  reinstall set it all again, Cellular Settings first.
 - rmtfs runs read-only (`-r`): modem EFS changes do not persist, which is why
   `diting-modem-setup` re-applies the USIM session and RAT preference each boot.
 
@@ -1408,3 +1417,57 @@ The watchdog runs the fixed script; nothing is left in `/tmp` and
 The owner watched the cellular network over this day of debugging and
 found it very stable (their words, 21:16). The journal of the same
 evening has the two recoveries above, at 21:35 and 21:57.
+
+## The modem dropped off the network every few minutes after a reinstall of the rootfs (2026-11-26, FIXED on the owner's phone)
+
+The owner saw the modem disconnect and connect again, again and again,
+and asked why, the modem patches being in place (2026-11-27). Nothing in
+the kernel, the modem or ModemManager was at fault: the rootfs had been
+installed again that evening, and `/etc/diting/modem-mode`, which no
+package carries ("Configuration the owner sets per phone", above), was
+gone with it. Times are the phone's clock, which runs 26 minutes behind.
+
+- 19:30:39: the first boot of the new rootfs, the one after it from
+  19:33:20. 19:31:45: `diting-modem-mode.service` skipped,
+  `ConditionPathExists` not met. So the modem was left as it was,
+  registering for voice and data, on a carrier (China Telecom, 46011) that
+  has a network for data only.
+- 19:36:51: the first refusal, `cs-domain-not-available (18)`, on LTE.
+  Four such lines to 21:19:01; 21 times the registration went from home to
+  searching and back; 27 times "registration in network failed: Network
+  timeout".
+- `diting-modem-redial` recovered eight times, 19:55:41 to 21:16:05: five
+  restarts of ModemManager, three of the modem firmware. Each put the
+  modem back on the same network with the same preference, and the drops
+  went on.
+- 21:26:45: the file written back as it was (`allowed="3g|4g|5g"`,
+  `preferred="5g"`, `usage="data"`, `service_domain="ps-only"`) and
+  `diting-modem-setup` run by hand with `apply-mode`. 21:26:51:
+  registered. To 00:04 the next day, two hours and a half: no refusal, no
+  drop, no recovery; EPS UE mode ps-2, registered at home on CHN-CT.
+
+What the watchdog saw here it cannot mend by itself: it finds a dead data
+path, not a registration the network keeps refusing, and the owner chose
+not to have it react to this refusal. What is done instead:
+
+- **Cellular Settings** (`packages/cellular-settings`, 2026-11-27): on
+  its Network page "EPS only, data-centric", Apply, and "Keep for next
+  boot" writes the file from the desktop session without a password. It
+  is on the owner's phone since 2026-11-26 and in every rootfs from
+  `make rootfs` on. After a reinstall: the app first, then the APN.
+- `release/INSTALL.md` and the runbook of CN-ADAPTATION.md say so.
+
+Two things of ModemManager came up while the app was written; the package's
+README has them in full.
+
+- **`SetEpsUeModeOperation` answers success and the modem does not
+  change** (OPEN). Twice on 2026-11-26, with the data connection up.
+  `diting-nas-pref` does change it, and reads it back until the modem
+  agrees; the app uses the tool and ModemManager's method only where the
+  tool is not. Why the method fails was not looked into.
+- **4G alone, 5G alone and 4G with 5G are not in `SupportedModes` of this
+  modem** (OPEN, and the owner stays without them): `SetCurrentModes`
+  refuses any pair outside that list, and for a "multimode" device
+  ModemManager leaves those three out. The desktop's settings show the
+  same list. A local patch to ModemManager was written and dropped on
+  2026-11-27; it is not in the tree.

@@ -103,15 +103,27 @@ throttling), worked out 2026-11-21/24. Fixes are commits on the
   `diting.debug=hold` in `/etc/diting/cmdline` parks the boot for
   filesystem repair (`e2fsck -fy /dev/sda37` with PID 1 frozen).
 - Cellular: APN for China Telecom is `ctnet` (`sudo nmcli c add type
-  gsm ifname '*' con-name mobile gsm.apn ctnet autoconnect yes`); the
+  gsm ifname '*' con-name mobile gsm.apn ctnet autoconnect yes`, or the
+  Mobile data page of Cellular Settings, 2026-11-27); the
   redial watchdog recovers hangs. A dial refused with `pdn-*-call-throttled`
   means the modem backs off for about five minutes: don't retry inside
   that. Reinstall `modemmanager` and `libmm-glib0` from the build host's
   `output/debs/` only (`packages/modemmanager/README.md`).
 - NetworkManager: give the gsm connection `connection.autoconnect-retries 1`;
-  otherwise every failed dial becomes twelve in a second (2026-11-24).
+  otherwise every failed dial becomes twelve in a second (2026-11-24). The
+  form of Cellular Settings sets it ("Dials before giving up", 1 for a new
+  connection).
 - Network mode: `/etc/diting/modem-mode`; the owner's phone has 3G, 4G, 5G
-  with 5G preferred, `usage="data"` and `service_domain="ps-only"`.
+  with 5G preferred, `usage="data"` and `service_domain="ps-only"`. Set it
+  in Cellular Settings → Network with "Keep for next boot" (passwordless
+  from the desktop session; SSH is refused). **A reinstall of the rootfs
+  loses the file**, and without it the network rejects the modem with
+  `cs-domain-not-available` every few minutes: check `cat /etc/diting/modem-mode`
+  first when the modem drops off the network (2026-11-26, KNOWN_ISSUES.md).
+- ModemManager's `SetEpsUeModeOperation` (`mmcli --3gpp-set-eps-ue-mode-operation`)
+  answered "successfully set" twice on 2026-11-26 and the modem did not
+  change; `diting-nas-pref usage=data service-domain=ps-only` changes it
+  and reads it back. Cellular Settings uses the tool.
 - Voice calls need VoLTE (open); from SSH `mmcli --voice-create-call`
   works for root only.
 - USB ethernet: docs/OTG.md.

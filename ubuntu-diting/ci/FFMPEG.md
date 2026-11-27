@@ -177,7 +177,12 @@ by it. Read there on 2026-11-26 and 27:
   already, pulled earlier with the digest this tree pins
   (`debian@sha256:a72b4433…`), so `FROM debian:trixie-slim@sha256:…`
   resolves locally. On a phone without it: `docker save` the image on the
-  build server and `docker load` it there.
+  build server and `docker load` it there. That was not always so: at 00:05
+  on 2026-11-27 `docker pull ubuntu:26.04@sha256:d66b366d…` was answered
+  from the registry in 3 s ("Image is up to date", the image of
+  `ci/Dockerfile.cellular-settings`), which is what that Dockerfile counts
+  on. What differed the day before was not looked into; `docker load`
+  stays the way for a phone that cannot.
 - **apt works inside the build**: `deb.debian.org` for the image (25–55 s),
   `ports.ubuntu.com` for the build chroot (its debootstrap took 14 minutes
   there on 2026-11-26, one package at a time).
