@@ -399,20 +399,60 @@ Which driver a browser decodes with, since 2026-11-28:
   starts that day's video as AV1 854x480: `Dav1dVideoDecoder`,
   `kIsPlatformVideoDecoder false`, first frame 3-4 s after the
   navigation, 30 frames a second, 6-8 dropped in 75 s, the whole browser
-  at 40-140 per cent of the eight cores. The same video with the quality
+  at 40-190 per cent of the eight cores. The same video with the quality
   forced to 1080p held 27-35 frames a second at 100-170 per cent. Local
   clips then, with no network in the way (10 s, 30 fps, cut by
   `liqin-study/scripts/phone-av1-gen.sh` and played by
   `phone-av1-local.py`; simple content, scaled from the H.264 test
-  clip) - frames a second, and the browser's share of the eight cores:
-  AV1 1080p 32 and 83 per cent, 1440p 33 and 156, 2160p 33 and 233,
-  none dropped and not one interrupt from the video core; VP9 1080p in
-  `VaapiVideoDecoder` 32 and 17, VP9 2160p 33 and 22. So software AV1
-  keeps up to 2160p30 at eight to ten times the hardware decoder's CPU;
-  real footage is heavier than these clips, and 2160p60 was not
-  measured. Chromium tells pages that AV1 is "supported, smooth, not
+  clip), frames a second: AV1 1080p 32, 1440p 33, 2160p 33, none dropped
+  and not one interrupt from the video core; VP9 1080p and 2160p in
+  `VaapiVideoDecoder` 32 and 33. So software AV1 keeps up to 2160p30 on
+  simple content; real footage is heavier, and 2160p60 was not
+  measured. (The CPU percentages written here first - 83, 156 and 233
+  per cent against 17 and 22 for hardware - were the mean of seconds
+  1-5 with the startup in them, not the steady cost; see the next
+  note.) Chromium tells pages that AV1 is "supported, smooth, not
   power efficient" at 1080p and at 4K60 alike, which is why YouTube
   picks it for the low levels.
+- **The frames AV1 does drop in software are not the VA-API driver's
+  doing either** (2026-11-28, 03:08-03:42; the owner found 6-8 dropped
+  in 75 s at 480p unreasonable and asked for a trial with "the version
+  that is not ours"). "Not ours" on this phone is the distribution's
+  state: libva 2.23 is Ubuntu's package and Mesa 26.0.8 ships no driver
+  for this GPU (r600, radeonsi, nouveau, virtio_gpu and d3d12 only), so
+  under the `msm` name there is nothing and `vaInitialize()` fails - no
+  hardware decoding for any codec. Two ways of getting there were
+  compared with the installed state (A). B: libva's driver path pointed
+  at an empty directory for the probe browser only
+  (`LIBVA_DRIVERS_PATH=/nonexistent`; `ab-lib.py`,
+  `local-drop-ab.py`, `yt-drop-ab.py` of the workspace). B-real: the
+  three files moved aside (`msm_drv_video.so`, `qcom_drv_video.so`,
+  `v4l2_drv_video.so`; `phone-va-restore-trial.sh`), hashes compared
+  before and after. B was checked each time by what the GPU process
+  held - none of our libraries mapped, no decoder device open, and VP9,
+  hardware in A, decoded by `VpxVideoDecoder` in software. Clips from
+  127.0.0.1 (30 s, 30 fps, trivial content), frames dropped, A against
+  B: with the phone quiet (AV1 480p in three runs of each) 0 against 0
+  every time, AV1 1080p 0 against 0, 30 frames a second; with the phone
+  busy (03:17-03:19, the same clips costing the browser 20-50 times
+  what they cost in the quiet runs) AV1 480p 7 against 10, AV1 1080p 2
+  against 2, VP9 15 in hardware against 0 in software. YouTube itself,
+  the quality left to YouTube (AV1 854x480 in `Dav1dVideoDecoder` every
+  time): A 0 of 2,387 frames in 80 s (03:32) and 0 of 2,707 in 90 s
+  (02:40), against the 6-8 of 2,250 at 02:38; B 32 of 3,422 in the busy
+  quarter of an hour (03:15), B-real 0 of 2,314 in 76 s (03:40). So the
+  drops follow what else the phone is doing, and are the same without
+  our driver. Three things kept as they are. CPU percentages from these
+  probes are not comparable between runs: the same clip cost the
+  browser 3 per cent in one run and 25 in another. One early B run
+  (03:11) reported `VaapiVideoDecoder` for VP9 although none of our
+  libraries was mapped when it was inspected afterwards - not
+  explained; every B run after it was checked by the decoder device
+  and decoded VP9 in software. And the flags that were to keep the
+  probe's pages from losing the DNS lottery
+  (`--dns-over-https-mode=secure`,
+  `--dns-over-https-templates=https://8.8.8.8/dns-query`) did not: of
+  seven B pages six still did not open.
 - **A video on YouTube taking long to start was the owner's network, not
   the browser or the driver** (2026-11-28). The Wi-Fi connection hands
   out 223.5.5.5 and 223.6.6.6, and for `*.googlevideo.com` their answers
