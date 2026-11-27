@@ -1,0 +1,86 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: royka1 <397414+royka1@users.noreply.github.com>
+Date: Sat, 28 Nov 2026 04:57:39 +0800
+Subject: [PATCH] PCI: qcom: Disable ASPM L0s for SM8475 PCIe0
+
+On the Xiaomi 12T Pro (SM8475) the QCA6490 is on PCIe0. The kernel enables
+ASPM L0s and L1 on the links of a devicetree platform by default, and with
+L0s on this link reports correctable errors: Replay Timer Timeout in the
+Wi-Fi chip and Bad TLP in the root port. They follow how often the link
+leaves its low-power states, not the amount of data. Six downloads of
+100 MB with pauses between them gave none; 4 MB transfers with gaps of 30
+to 100 ms gave 11 errors in 300 s with L0s enabled (the same with the L1
+substates off) and none in 200 s with ASPM disabled through the policy.
+
+The stock device tree of the phone says the platform does not support L0s
+(qcom,no-l0s-supported). Upstream disables it for sc8280xp, sa8540p and
+sa8295p for the same errors on the same Wi-Fi chip ("PCI: qcom: Disable
+ASPM L0s for sc8280xp, sa8540p and sa8295p"): Qualcomm confirmed that the
+PHY configuration of those platforms is not tuned for L0s.
+
+Give SM8475 PCIe0 its own compatible and configuration, as sc8280xp has.
+L1 and the L1 substates stay on.
+
+Signed-off-by: royka1 <397414+royka1@users.noreply.github.com>
+---
+ Documentation/devicetree/bindings/pci/qcom,pcie-sm8450.yaml | 1 +
+ arch/arm64/boot/dts/qcom/sm8475.dtsi                         | 7 +++++++
+ drivers/pci/controller/dwc/pcie-qcom.c                      | 6 ++++++
+ 3 files changed, 14 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/pci/qcom,pcie-sm8450.yaml b/Documentation/devicetree/bindings/pci/qcom,pcie-sm8450.yaml
+index 28b8ffb..804f42a 100644
+--- a/Documentation/devicetree/bindings/pci/qcom,pcie-sm8450.yaml
++++ b/Documentation/devicetree/bindings/pci/qcom,pcie-sm8450.yaml
+@@ -19,6 +19,7 @@ properties:
+     enum:
+       - qcom,pcie-sm8450-pcie0
+       - qcom,pcie-sm8450-pcie1
++      - qcom,pcie-sm8475-pcie0
+ 
+   reg:
+     minItems: 5
+diff --git a/arch/arm64/boot/dts/qcom/sm8475.dtsi b/arch/arm64/boot/dts/qcom/sm8475.dtsi
+index 2f5b29b..9a18b5b 100644
+--- a/arch/arm64/boot/dts/qcom/sm8475.dtsi
++++ b/arch/arm64/boot/dts/qcom/sm8475.dtsi
+@@ -65,8 +65,14 @@
+  * MSIs from the endpoint never reach the GIC ITS on SM8475 (the vendor kernel
+  * uses SPI-based MSI as well): ath11k's MHI boot times out. Use the
+  * controller's own MSI interrupts.
++ *
++ * ASPM L0s stays off, as in the vendor device tree (qcom,no-l0s-supported):
++ * with it on, the link to the QCA6490 reports correctable errors (BadTLP,
++ * Timeout). The compatible selects the driver configuration without L0s.
+  */
+ &pcie0 {
++	compatible = "qcom,pcie-sm8475-pcie0";
++
+ 	/delete-property/ msi-map;
+ 	/delete-property/ msi-map-mask;
+ };
+diff --git a/drivers/pci/controller/dwc/pcie-qcom.c b/drivers/pci/controller/dwc/pcie-qcom.c
+index d62cf30..b00cdff 100644
+--- a/drivers/pci/controller/dwc/pcie-qcom.c
++++ b/drivers/pci/controller/dwc/pcie-qcom.c
+@@ -1573,6 +1573,12 @@ static const struct qcom_pcie_cfg cfg_1_9_0 = {
+ 	.ops = &ops_1_9_0,
+ };
+ 
++/* SM8475 PCIe0: 1.9.0 with ASPM L0s off (the PHY is not tuned for it) */
++static const struct qcom_pcie_cfg cfg_sm8475_pcie0 = {
++	.ops = &ops_1_9_0,
++	.no_l0s = true,
++};
++
+ static const struct qcom_pcie_cfg cfg_1_34_0 = {
+ 	.ops = &ops_1_9_0,
+ 	.override_no_snoop = true,
+@@ -2344,6 +2350,7 @@ static const struct of_device_id qcom_pcie_match[] = {
+ 	{ .compatible = "qcom,pcie-sm8350", .data = &cfg_1_9_0 },
+ 	{ .compatible = "qcom,pcie-sm8450-pcie0", .data = &cfg_1_9_0 },
+ 	{ .compatible = "qcom,pcie-sm8450-pcie1", .data = &cfg_1_9_0 },
++	{ .compatible = "qcom,pcie-sm8475-pcie0", .data = &cfg_sm8475_pcie0 },
+ 	{ .compatible = "qcom,pcie-sm8550", .data = &cfg_1_9_0 },
+ 	{ .compatible = "qcom,pcie-x1e80100", .data = &cfg_sc8280xp },
+ 	{ }
