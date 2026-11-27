@@ -591,8 +591,8 @@ debootstrap 在 qemu 下约 6 分钟，一次编译约 6 分钟。
 1. **方案 A 还是 B**：它现在只是解码的问题（换不换驱动去解码）。编码这一半浏览器在这台手机上
    用不上，跟驱动无关（12.7）。ffmpeg 一层的解码回归通过；还差浏览器播放的回归。
 2. **浏览器里用上硬件编码**：要上游动手，两条路任选其一（12.7）。不在仓库里。
-3. **RustDesk 实测**：驱动这边通了（12.8，第四个补丁）；还差在手机上装 RustDesk，带着
-   `LIBVA_DRIVER_NAME=qcom` 跑一次（装不装机主决定）。
+3. **RustDesk 实测**：装上了，编码器这一半是通的，画面出不来——卡在手机的屏幕共享链路上
+   （portal 后端崩溃、选择器 slurp 崩溃、没有 uinput），12.8。要它跑起来得先修那一链路。
 4. 真实会议画面的码控、首帧和关键帧的延迟、对端解码器：只对用得上 VA-API 编码器的客户端有意义
    （比如装了 `gstreamer1.0-va` 的 GStreamer 应用）。
 5. 四个补丁报给上游（报之前清掉 12.8 末尾那处编译警告）。
@@ -739,6 +739,21 @@ surface 的那条命令）：
 
 **还差的**：
 
-- RustDesk 没装。要它用上，进程里要有 `LIBVA_DRIVER_NAME=qcom`（不设的话拿到默认驱动，ffmpeg 找
-  不到编码入口）；Wayland 下抓屏要经 portal，这台手机上行不行没试过。装不装机主决定。
 - `rate-change.cpp:61` 有一处编译警告（花括号初始化里的类型窄化，补丁 0002 的测试），报上游前清掉。
+
+**RustDesk 装上实测**（机主要求，23:05 起）。官方 `rustdesk-1.5.3-aarch64.deb`，只新装了这一个包；
+服务带 `LIBVA_DRIVER_NAME=qcom`（drop-in），Mac 上的 RustDesk 1.4.6 当控制端，IP 直连。
+
+- **编码器这一半是通的**：RustDesk 自己的探测（`--check-hwcodec-config`）报
+  `Encoder h264_vaapi created successfully`、`test passed on attempt 1`，VA-API 的 H.264/HEVC 解码器
+  也过；每次会话的协商都是 `used preference: Auto, encoder: H264`。第四个补丁之前它连编码器都打不开。
+- **画面出不来**，一帧都没进编码器。卡在手机的屏幕共享链路上，和编码器无关：
+  1. 屏幕选择器 `slurp`（1.6.0）一起动就段错误，portal 回“用户取消”，屏幕上从没出现过确认框；
+  2. 绕过选择器之后，RustDesk 的 `pipewiresrc` 一接上，`xdg-desktop-portal-wlr`（0.8.1）就在
+     `xdpw: unable to find format: 875713112`（XR24）之后段错误，systemd 重启它（那晚七次）；
+     RustDesk 的流随后被会话管理器接到摄像头上，30 秒后 Mac 超时断开；
+  3. `/dev/uinput` 不存在，远程键鼠注入不了。
+- 过程、证据和 RustDesk 的几个“惯例”（IP 直连默认关、空闲后第一次连接会被重置等）记在
+  `ubuntu-diting/docs/KNOWN_ISSUES.md` 的“Screen sharing through the desktop portal”一节。
+- 测完手机已恢复：免选择器的配置、调试日志、临时密码、IP 直连都撤了；RustDesk 留着，开机自启，
+  没有固定密码。我弄崩过一次主 portal（手工调用漏了参数，断了 35 秒，已恢复）。

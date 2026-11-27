@@ -359,6 +359,101 @@ the `libva-v4l2-stateful` package (patched VA-API driver, also installed as
 - Kernel r38 or later is required: earlier iris read past its timestamp
   metadata (0084) and could end decoding with a spurious EOS.
 
+### Screen sharing through the desktop portal crashes the portal backend: RustDesk cannot show this phone's screen (2026-11-27, OPEN)
+
+RustDesk 1.5.3 (`rustdesk-1.5.3-aarch64.deb` from the project's GitHub
+release, sha256 `fa85e8d3…82ae19`) was installed on the phone at the owner's
+request, to try the hardware encoder from a real client. It is the only
+package that was added. Its unit `rustdesk.service` runs as root and starts
+`--server` as the logged-in user; a drop-in,
+`/etc/systemd/system/rustdesk.service.d/vaapi.conf`, gives it
+`LIBVA_DRIVER_NAME=qcom`. Left installed and enabled, with no permanent
+password and direct IP access off. Scripts: `phone-rustdesk-install.sh` and
+`phone-rustdesk-restore.sh` in `liuqin-study/scripts` of the workspace; logs
+in `liuqin-study/raw/vaenc-eval/rustdesk-2026-11-27/`.
+
+What the encoder side says (all on the phone):
+
+- RustDesk's own check, `rustdesk --check-hwcodec-config`: "Encoder h264_vaapi
+  created successfully", "test passed on attempt 1", and VAAPI decoders for
+  H.264 and HEVC pass too; it keeps `ram_encode: [h264_vaapi]`. With the driver
+  before patch 0004 it could not have opened the encoder.
+- Every session negotiated H.264 ("connection count: 1, used preference: Auto,
+  encoder: H264") with RustDesk 1.4.6 on the Mac, which decodes H.264 with
+  VideoToolbox.
+
+What stops it, in order. All of it is on the phone's desktop side; the kernel
+log had nothing from the video core through all of it.
+
+1. **The screen chooser segfaults.** `xdg-desktop-portal-wlr` (0.8.1-1) is the
+   only backend here that offers ScreenCast (`wlr.portal`, `UseIn=…phosh…`),
+   and it has no dialog of its own: it runs a chooser, the first being
+   `slurp -f 'Monitor: %o' -or`. `slurp` 1.6.0-1 maps its overlay and
+   segfaults on the compositor's first keyboard events (exit 139, run by hand,
+   and in the portal's log). The portal answers "User cancelled interaction"
+   and RustDesk reports "Wayland portal handshake failed:
+   wl-stage:select-sources:declined". Nothing is shown on the screen to
+   confirm, so no app on this phone can share the screen.
+2. **With the chooser bypassed the portal backend crashes when RustDesk
+   connects.** `chooser_type = none` in
+   `~/.config/xdg-desktop-portal-wlr/config` lets any app in the session
+   capture the screen unasked; it was set for the test and removed after.
+   The portal then grants a stream (node 93, 1356x610 logical), and when
+   RustDesk's `pipewiresrc` connects: `xdpw: unable to find format: 875713112`
+   (XR24, XRGB8888), `pipewire: failed to create xdpw buffer`, `Main process
+   exited … status=11/SEGV`, and a systemd restart. Seven crashes are logged
+   that evening. In the source (0.8.1, `screencast_common.c`
+   `xdpw_buffer_create`, `pipewire_screencast.c`
+   `pwr_handle_stream_add_buffer`) the negotiated PipeWire format is not in
+   the compositor's `wl_shm` format list the portal holds at that moment: it
+   destroys its own instance inside PipeWire's add-buffer callback and
+   returns with the buffer untouched, and the segfault follows from there.
+   Where XR24 came from and why the list lacks it was not settled: the
+   portal's list is built from the screencopy frame's `buffer` events rather
+   than from `wl_shm`, and the release build logs errors only. The
+   compositor's `wl_shm` list, read from slurp's protocol trace, has 16
+   formats, XB24 and AB24 among them. RustDesk is left with no source: its
+   probe reads a 0x0 stream, 23 s later it starts again and the session
+   manager links its stream to the first `Video/Source`, a camera (`pw.link:
+   (76.0.0 -> 92.0.0) … Buffer allocation failed`), and the Mac gives up after
+   30 s ("Connection closed: Timeout"). No frame reached the encoder: one
+   encoder session a connection, one frame in it, and that is the hwcodec
+   check.
+3. **`/dev/uinput` does not exist** (no module, not built in): the server
+   logs "Failed to create keyboard/mouse: No such file or directory". With the
+   fallback, xdo over XWayland, Wayland apps cannot be driven. Remote input
+   would not work even with a picture.
+
+RustDesk's habits, for the next attempt:
+
+- Direct IP access is off by default: nothing listens on 21118 until
+  `rustdesk --option direct-server Y`, which also restarts the server.
+- The first connection after the server has been idle for a minute is reset
+  by `--service` ("restart server"); a client with a main window reconnects
+  by itself. One started with `--connect` and no main window neither
+  reconnects nor takes another `--connect`.
+- `rustdesk --password` writes `RustDesk.toml`, not the options, and
+  `--password ''` clears it.
+- The unit's `ExecStop` is `pkill -f "rustdesk --"`: keep that string out of
+  command lines that may be alive when the service stops. Drive the phone
+  through scripts sent on stdin.
+
+Two things the test did to the phone, both undone:
+
+- A portal request written by hand without `session_handle_token` aborts
+  `xdg-desktop-portal` 1.21.1 (`xdp_session_initable_init`: `session->token
+  != NULL`). The unit has no `Restart=`, so it stays down until
+  `systemctl --user start xdg-desktop-portal`. It happened once, for 35 s.
+- Reading the gadget's `UDC` attribute hangs in the kernel since the boot of
+  21:12 (see "diting-hardware-recovery", below); one more `cat` was left in
+  state D by a diagnostic that timed out on it.
+
+What it would take: `xdg-desktop-portal-wlr` that does not crash and
+negotiates a format it can make (or phoc offering the same formats on both
+paths), a chooser that works where slurp 1.6.0 does not, and uinput in the
+kernel. Until then RustDesk on this phone cannot show its screen, and the
+hardware encoder has been tried from ffmpeg and the driver's tests only.
+
 ### Reboot can hang after the video codec was used
 
 Several reboots hung at the end of `systemd-shutdown` after iris sessions;
@@ -1520,6 +1615,20 @@ that. And after a reset NetworkManager shows `usb0` disconnected, with
 the gadget script's own 172.16.42.1/24 on it: `recover_usb` starts the
 script without the empty `DITING_USB_ADDR` of its unit. So it was before
 the fix, and the Mac is reached through it all the same.
+
+Seen again on another boot (2026-11-27, booted 21:11:50, device 0.7.36 on the
+phone), in another place. At 138 s, while the gadget was being bound by a
+write to its `UDC`, the kernel oopsed on the path above (`usb_ep_alloc_request`
+with x0 = 0, from `composite_dev_prepare` and `configfs_composite_bind` under
+`gadget_bind_driver`); before it came "dwc3-qcom a600000.usb: remote wakeup not
+configured" at 69 s and "Configuration mismatch. dr_mode forced to gadget" at
+135 s. Since then `usb0` does not exist, the UDC is "not attached", and every
+read of the gadget's `UDC` blocks in the kernel (`gadget_dev_desc_UDC_show`):
+the recovery script's own `cat` has been in state D since 21:14:08, so its
+loop is stuck, and a diagnostic that tried the same read under a timeout left
+a second one (a process in D cannot be killed; both go at the next reboot).
+The Mac was reached over Wi-Fi. Evidence: `usb-gadget-stuck-2026-11-27.txt`
+in `liuqin-study/raw/vaenc-eval/rustdesk-2026-11-27/` of the workspace.
 
 The phone's package: dpkg has had 0.7.26 since 2026-11-21. The files of
 the later versions were copied onto it by hand, 0.7.36's as well: a deb
