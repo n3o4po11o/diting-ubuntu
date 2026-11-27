@@ -376,9 +376,22 @@ Which driver a browser decodes with, since 2026-11-28:
   `~/snap/chromium/common/dri` at login and writes `~/.chromium-browser.init`
   (VA-API feature flags) if there is none, so the snap never sees the `msm`
   name. After a package upgrade the copy is refreshed at the next login, or
-  by running `diting-chromium-vaapi`. It stays until the owner moves to the
-  deb: a Chromium profile is not readable by an older version, and the
-  snap's is 158 against the deb's 156.
+  by running `diting-chromium-vaapi`. A Chromium profile is not readable
+  by an older version, and the snap's was 158 against the deb's 156.
+  **The snap is gone from the phone** (2026-11-28, at the owner's request,
+  "delete it"): `snap save` first - snapshot 1, 82.9 MB, the profile of 158
+  (`sudo snap forget 1` drops it for good, `snap restore 1` brings it
+  back) - then `snap remove --purge chromium`; `diting-chromium-vaapi` is
+  disabled on the phone (`systemctl --global disable`; a user-scope
+  `disable` does not take, the unit is enabled for all users), so that it
+  does not build `~/snap/chromium/common/dri` again at the next login.
+  Of the 1.1 GB of snaps, the four content snaps that served only Chromium
+  (`gnome-core26`, `gtk-common-themes`, `mesa-2404`, `mesa-2604`, about
+  850 MB) are now used by nothing; `cups` is this phone's print service (no
+  deb `cups-daemon` is installed) and stays. Every snap left on the phone
+  is one the rootfs preseeds (`build-rootfs.sh`: snapd, bare, core24,
+  core26, chromium, gnome-core26, gtk-common-themes, mesa-2404, mesa-2604
+  and cups); the image still builds the snap.
 
 Limits of `libva-v4l2-stateful`, which snap Chromium still uses:
 

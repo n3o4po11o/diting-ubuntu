@@ -810,7 +810,12 @@ config: 12`。缩放和 10→8-bit 的转换走 CPU：`hwdownload,format=p010le,
 **还没做的**：
 
 - 镜像层面把 snap Chromium 换成 deb：PPA 进根文件系统、`chromium.d` 的片段进包、snapd 去留、
-  `libva-v4l2-stateful` 去留（deb Chromium 验证过了，旧驱动就只剩 snap 这一个使用者）。手机上
-  snap 也还在。
-- snap 里那份 158 的配置迁到 156：Chromium 的配置不能降级用，得导出书签、密码，或者靠同步。
+  `libva-v4l2-stateful` 去留（根文件系统现在预装 snapd、chromium 和它那几个依赖 snap，还有打印用的
+  cups，见 `build-rootfs.sh`；旧驱动为 snap 那份拷贝留着）。手机上的 snap 已经删了（见下）。
+- 手机上的 snap 已删（机主：“直接删除”，01:20）：先 `snap save` 留了快照 1 号（82.9 MB，158 的
+  配置），再 `snap remove --purge chromium`；只为它存在的用户服务 `diting-chromium-vaapi` 已全局停用。
+  deb 版是全新的配置；那份 158 的书签、密码在快照里，要的话从中导出。
+- 手机上剩下的 snap（共 1.1 GB）：只给 Chromium 用的四个内容包（`gnome-core26`、
+  `gtk-common-themes`、`mesa-2404`、`mesa-2604`，约 850 MB）现在没人用；`cups` 是这台手机的打印
+  服务（没装 deb 版的 cupsd），不动；snapd 本体去留等机主定。
 - `rate-change.cpp:61` 的编译警告（补丁 0002 的测试里），报上游前清掉。
