@@ -220,15 +220,20 @@ kernel log had nothing new through all of it. Limits:
   to make that reliable is in the VA-API driver, below (patch 0003).
 - The HEVC level is not constrained by the driver (H.264's is, by 0128).
 
-Hardware encoding **through VA-API**: the `qcom-va-driver` package (2026-11-27).
-Radxa's reference implementation (MIT) at `ee8622c` with four patches of ours
-(`packages/qcom-va-driver/patches`), built by `make qcom-va-driver`
-(`docs/VIDEO_ENCODE.md`, which was the evaluation and is now the record).
-Installed on the phone by hand as `1.1.1+gitee8622c-0diting5`; not in an
-image. It is `qcom_drv_video.so` and nothing else, so it stands next to
-`libva-v4l2-stateful`, which keeps the `msm` and `v4l2` names: a program picks
-it with `LIBVA_DRIVER_NAME=qcom`, and the browsers do not use it yet. Read on
-the phone (the tables are in `docs/VIDEO_ENCODE.md`, section 12):
+The default VA-API driver **through `qcom-va-driver`** (2026-11-27; the
+default since 2026-11-28). Radxa's reference implementation (MIT) at
+`ee8622c` with four patches of ours (`packages/qcom-va-driver/patches`),
+built by `make qcom-va-driver`, in the rootfs (`docs/VIDEO_ENCODE.md`, which
+was the evaluation and is now the record). Since
+`1.1.1+gitee8622c-0diting6` it is installed as `msm_drv_video.so` as well,
+the name libva derives from the msm DRM driver: every program gets its
+encoder and its decoders with nothing set. `libva-v4l2-stateful` gives that
+name up at the same time (`0diting4`), keeps only `v4l2_drv_video.so` for
+snap Chromium's own copy, and depends on this package. On the phone as
+`0diting6` and `0diting4`. Until 2026-11-28 it was `qcom_drv_video.so` and
+nothing else, picked with `LIBVA_DRIVER_NAME=qcom`, and the default was
+`libva-v4l2-stateful`. Read on the phone (the tables are in
+`docs/VIDEO_ENCODE.md`, section 12):
 
 - `vainfo` lists `VAEntrypointEncSlice` for H.264 (Constrained Baseline,
   Main, High) and HEVC Main. 74 streams, one session each - one GOP, CQP, CBR
@@ -280,10 +285,28 @@ the phone (the tables are in `docs/VIDEO_ENCODE.md`, section 12):
   be exported. Read on the phone with ffmpeg 8.0.1, by the settings RustDesk
   gives `h264_vaapi`, `testsrc2` uploaded as I420: 169 fps at 720p, 120 at
   1080p, 96 at 2340x1080, and the bitstreams are byte for byte those of
-  the same frames uploaded as NV12. RustDesk itself is not installed, and
-  would need `LIBVA_DRIVER_NAME=qcom` in its environment: without it, it
-  gets the default driver, where ffmpeg finds no encoding entrypoint.
-  `qcom-va-driver-tests` has `i420-surface` for all of this.
+  the same frames uploaded as NV12. `qcom-va-driver-tests` has
+  `i420-surface` for all of this.
+- **It is the default driver since 2026-11-28** (`0diting6`, the owner's
+  decision), read on the phone with nothing set. `vainfo`: four profiles
+  with an encoder and seven with a decoder, as with
+  `LIBVA_DRIVER_NAME=qcom`; under `v4l2` the old driver still answers, with
+  no encoder and seven decoders. The package's tests open the default driver
+  and pass as they are: `api-smoke`, `i420-surface` in H.264 and HEVC,
+  `rate-change` three ways, `async` 20 runs and `async-dump` 20 rounds
+  without a difference. ffmpeg decodes the seven clips of the regression
+  frame for frame as software does, 10-bit included, and encodes `testsrc2`
+  at 1999 kbit/s in H.264 and 1996 in HEVC for 2000 asked; one command that
+  decodes H.264 and encodes HEVC, both in hardware, takes 150 frames of
+  1080p in 1.8 s. The kernel log had nothing through all of it
+  (`liqin-study/raw/vaenc-eval/default-driver-2026-11-28/` of the workspace).
+- **No video processor in this build of the driver.** The package is
+  configured without the GPU copy and without the CDSP and Vulkan backends,
+  so `VAEntrypointVideoProc` is not there and ffmpeg's `scale_vaapi` fails
+  ("Failed to create processing pipeline config: 12"). Scaling and a
+  10-to-8-bit conversion go through the CPU:
+  `hwdownload,format=p010le,scale=1920:1080,format=nv12,hwupload` (4K Main10
+  to 1080p H.264: 150 frames in 8.2 s).
 - Decoding through it, read with ffmpeg against a software decode: H.264,
   HEVC and VP9 at 8 bit frame for frame identical, 720p to 4K, with B frames,
   on a seek, three seeks in one process, and two decoders next to an encoder.
@@ -326,15 +349,39 @@ the phone (the tables are in `docs/VIDEO_ENCODE.md`, section 12):
 
 ### Browser video decoding (VA-API over V4L2)
 
-Firefox and Chromium decode H.264, HEVC and VP9 on the iris decoder through
-the `libva-v4l2-stateful` package (patched VA-API driver, also installed as
-`msm_drv_video.so`, so no `LIBVA_DRIVER_NAME` is needed). Limits:
+Which driver a browser decodes with, since 2026-11-28:
 
-- **Snap Chromium** cannot read host libraries. A systemd user service
-  (`diting-chromium-vaapi`) copies the driver into
+- **Firefox** (161, Mozilla's deb) uses the host's default driver, which is
+  now `qcom-va-driver`; a default pref (`firefox-vaapi.js`, still shipped by
+  `libva-v4l2-stateful`) makes it try hardware decoding on this GPU. Read on
+  the phone with nothing set, H.264 1080p: the decoder held open by Firefox,
+  the driver reporting 31 frames a second, and the picture the page drew the
+  same as with the old driver. Firefox drops 7-8 per cent of the frames in
+  the first seconds of a page with either driver (27 of 346 at 12 s with
+  this one, 23 of 345 with the old one).
+- **A deb Chromium** (156.0.8078.108-1xtradeb1.2604.1 from `ppa:xtradeb/apps`,
+  installed by hand on 2026-11-28 at the owner's request; Ubuntu's archive
+  has only the package that installs the snap) reads the host's libraries,
+  so it uses the default driver as well. `/etc/chromium.d/zz-diting-vaapi`
+  gives it the flags the snap gets from `~/.chromium-browser.init`
+  (`--ozone-platform=wayland` and the VA-API features); written by hand, not
+  packaged yet. Read with the page drawing the video to a canvas and posting
+  it, with nothing set and with `LIBVA_DRIVER_NAME=qcom` before that: H.264
+  1080p, HEVC 1080p, HEVC Main10 4K, VP9 1080p and VP9 profile 2, each at
+  29-30 frames a second with no frame dropped and the picture that of a
+  software decode - 10-bit 4K included, which `libva-v4l2-stateful` cannot.
+  With the old driver through the same deb, H.264 decoded in hardware too.
+- **Snap Chromium** (158) stays on the old driver. A snap cannot read host
+  libraries: `diting-chromium-vaapi` copies `v4l2_drv_video.so` into
   `~/snap/chromium/common/dri` at login and writes `~/.chromium-browser.init`
-  (VA-API feature flags) if there is none. After a package upgrade the copy
-  is refreshed at the next login, or by running `diting-chromium-vaapi`.
+  (VA-API feature flags) if there is none, so the snap never sees the `msm`
+  name. After a package upgrade the copy is refreshed at the next login, or
+  by running `diting-chromium-vaapi`. It stays until the owner moves to the
+  deb: a Chromium profile is not readable by an older version, and the
+  snap's is 158 against the deb's 156.
+
+Limits of `libva-v4l2-stateful`, which snap Chromium still uses:
+
 - **The driver opens only `/dev/video0` or `/dev/video-dec0`**
   (`v4l2_open_device()` in upstream `src/v4l2-backend.c`). The iris decoder
   is `/dev/video0` only when it registers before the cameras, a race at every
@@ -365,10 +412,11 @@ RustDesk 1.5.3 (`rustdesk-1.5.3-aarch64.deb` from the project's GitHub
 release, sha256 `fa85e8d3…82ae19`) was installed on the phone at the owner's
 request, to try the hardware encoder from a real client. It is the only
 package that was added. Its unit `rustdesk.service` runs as root and starts
-`--server` as the logged-in user; a drop-in,
-`/etc/systemd/system/rustdesk.service.d/vaapi.conf`, gives it
-`LIBVA_DRIVER_NAME=qcom`. Left installed and enabled, with no permanent
-password and direct IP access off. Scripts: `phone-rustdesk-install.sh` and
+`--server` as the logged-in user; until 2026-11-28 a drop-in gave it
+`LIBVA_DRIVER_NAME=qcom`, and since the default driver is `qcom-va-driver`
+it needs nothing (the drop-in is removed, and its own check passes without
+it). Left installed and enabled, with no permanent password and direct IP
+access off. Scripts: `phone-rustdesk-install.sh` and
 `phone-rustdesk-restore.sh` in `liuqin-study/scripts` of the workspace; logs
 in `liuqin-study/raw/vaenc-eval/rustdesk-2026-11-27/`.
 

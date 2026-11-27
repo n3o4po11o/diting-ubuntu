@@ -59,7 +59,8 @@ phone, fingerprints in `config/diting.conf`) is used for debootstrap so that
 the Release signature is checked. `img2simg` (android-tools) makes the sparse
 image for `make release`.
 
-`build-libva-v4l2-stateful.sh` (VA-API driver) and `build-firmware-setup.sh` build in their own arm64
+`build-qcom-va-driver.sh` (the default VA-API driver), `build-libva-v4l2-stateful.sh` (the old VA-API
+driver, kept for snap Chromium's own copy) and `build-firmware-setup.sh` build in their own arm64
 buildd chroot (`work/build-chroot-<suite>-arm64`, created with
 `debootstrap --variant=buildd`, main/universe enabled), which runs under
 qemu-user via binfmt on x86_64 (registered by `qemu-linux-user`; the `F`

@@ -14,19 +14,24 @@ Rules-Requires-Root: no
 
 Package: libva-v4l2-stateful
 Architecture: arm64
-Depends: ${shlibs:Depends}, ${misc:Depends}
-Description: VA-API driver for V4L2 stateful video decoders (Diting iris)
+Depends: ${shlibs:Depends}, ${misc:Depends},
+         qcom-va-driver (>= 1.1.1+gitee8622c-0diting6)
+Description: VA-API driver for V4L2 stateful video decoders (Diting iris), kept for snap Chromium
  VA-API backend on top of V4L2 stateful (memory-to-memory) decoders,
  patched for the Qualcomm iris decoder of the Xiaomi 12T Pro (diting):
  H.264, HEVC and VP9 hardware decoding for VA-API applications.
  .
- Also installed as msm_drv_video.so, the name libva derives from the msm
- DRM driver, so applications use it without LIBVA_DRIVER_NAME.
+ No longer the default driver. Since 2026-11-28 qcom-va-driver, which this
+ package depends on, is installed as msm_drv_video.so, the name libva
+ derives from the msm DRM driver, and decodes and encodes for every program
+ that does not say otherwise; Firefox, which uses the host's driver, gets a
+ default pref here that makes it try hardware decoding on this GPU.
+ .
+ This driver is installed as v4l2_drv_video.so only, for snap Chromium: the
+ snap cannot read host libraries, so a systemd user service copies the file
+ into ~/snap/chromium/common/dri at login and points the snap there through
+ ~/.chromium-browser.init (see diting-chromium-vaapi).
  .
  A udev rule names the decoder /dev/video-dec0, one of the two paths the
  driver opens (the other, /dev/video0, is the decoder only when it registers
  before the cameras).
- .
- Firefox works directly. Snap Chromium cannot read host libraries: a
- systemd user service copies the driver into ~/snap/chromium/common/dri
- at login (see diting-chromium-vaapi).

@@ -1,7 +1,8 @@
 # 视频硬件编码进浏览器：在 V4L2 编码器上做 VA-API（Chromium）
 
 状态：**第 1–11 节是 2026-11-27 的评估，原样保留；实施记录在第 12 节**，读的时候以它为准
-（它更正了评估里的几处）。“现状”是那天在手机上（内核 `7.2.10-diting`，固件
+（它更正了评估里的几处）。2026-11-28 起默认的 VA-API 驱动是 `qcom-va-driver`（12.9）：下面凡是
+“用 `LIBVA_DRIVER_NAME=qcom` 才选它”的说法，都是那一天之前的。“现状”是那天在手机上（内核 `7.2.10-diting`，固件
 `vpu20_4v.mbn`，Chromium snap `158.0.8127.36`）、在源码里（Chromium 分支 `8127`、
 `radxa-pkg/qcom-va-driver@ee8622c`、我们的内核树）读出来的；没有读过、没有试过的地方标了
 “待核实”。
@@ -447,9 +448,10 @@ QP 的写法：
 | `config/diting.conf` | `QCOM_VA_DRIVER_URL`、`QCOM_VA_DRIVER_COMMIT`（`ee8622c`）；`fetch-sources.sh` 认识这个名字，`ci/tests.sh` 的计数跟着改成 17 |
 | 两个 deb | `qcom-va-driver`（只有 `/usr/lib/aarch64-linux-gnu/dri/qcom_drv_video.so`）、`qcom-va-driver-tests`（上游的硬件测试加 `rate-change`，在 `/usr/libexec/qcom-va-driver/tests/`） |
 
-**它不在镜像里**：`make rootfs` 不依赖它，`build-rootfs.sh` 不装它。方案（5.1 的 A 还是 B）定下来
+**它当时不在镜像里**：`make rootfs` 不依赖它，`build-rootfs.sh` 不装它。方案（5.1 的 A 还是 B）定下来
 之前不进镜像。手机上是用 `dpkg -i` 装的 `1.1.1+gitee8622c-0diting3`，和 `libva-v4l2-stateful`
-并装；程序用 `LIBVA_DRIVER_NAME=qcom` 才选它，浏览器照旧用旧驱动。
+并装；程序用 `LIBVA_DRIVER_NAME=qcom` 才选它，浏览器照旧用旧驱动。（2026-11-28 起它进了镜像，
+`msm` 这个名字也归了它，见 12.9。）
 
 **怎么建**。构建服务器是 x86_64 的 Debian 13，主机上只有 git、docker、rsync、tmux。chroot 在
 `ci/Dockerfile.ffmpeg` 那个容器里建（`ci/ffmpeg.sh`：它是仓库里现成的“特权 chroot 构建容器”，
@@ -588,15 +590,15 @@ debootstrap 在 qemu 下约 6 分钟，一次编译约 6 分钟。
 
 ### 12.6 还没做的
 
-1. **方案 A 还是 B**：它现在只是解码的问题（换不换驱动去解码）。编码这一半浏览器在这台手机上
-   用不上，跟驱动无关（12.7）。ffmpeg 一层的解码回归通过；还差浏览器播放的回归。
+1. **方案 A 还是 B**：已定，方案 A（机主 2026-11-28）——默认驱动换成它，浏览器播放的回归
+   也过了（12.9）。编码这一半浏览器在这台手机上仍用不上，跟驱动无关（12.7）。
 2. **浏览器里用上硬件编码**：要上游动手，两条路任选其一（12.7）。不在仓库里。
 3. **RustDesk 实测**：装上了，编码器这一半是通的，画面出不来——卡在手机的屏幕共享链路上
    （portal 后端崩溃、选择器 slurp 崩溃、没有 uinput），12.8。要它跑起来得先修那一链路。
 4. 真实会议画面的码控、首帧和关键帧的延迟、对端解码器：只对用得上 VA-API 编码器的客户端有意义
    （比如装了 `gstreamer1.0-va` 的 GStreamer 应用）。
 5. 四个补丁报给上游（报之前清掉 12.8 末尾那处编译警告）。
-6. `qcom-va-driver` 进不进镜像：现在只是手机上手工装的。
+6. `qcom-va-driver` 进不进镜像：已进（12.9）。
 
 ### 12.7 下午：0137 上机之后
 
@@ -757,3 +759,58 @@ surface 的那条命令）：
   `ubuntu-diting/docs/KNOWN_ISSUES.md` 的“Screen sharing through the desktop portal”一节。
 - 测完手机已恢复：免选择器的配置、调试日志、临时密码、IP 直连都撤了；RustDesk 留着，开机自启，
   没有固定密码。我弄崩过一次主 portal（手工调用漏了参数，断了 35 秒，已恢复）。
+
+### 12.9 2026-11-28：默认驱动换成 qcom-va-driver，Chromium 换成 deb
+
+**机主的决定**：以后不用 `LIBVA_DRIVER_NAME=qcom`，默认的 `msm` 就是这个驱动（方案 A）。接着
+又决定抛开 snap，Chromium 换成 deb。
+
+**仓库里改了什么**：
+
+- `qcom-va-driver`（`1.1.1+gitee8622c-0diting6`）：`debian/links` 多装一个
+  `msm_drv_video.so → qcom_drv_video.so`；对旧于 `0diting4` 的 `libva-v4l2-stateful` 声明
+  `Breaks` 和 `Replaces`（`msm_drv_video.so` 这个文件从那边挪到了这边，两个包要一次装）。
+- `libva-v4l2-stateful`（`0.1.0+git6447ebb-0diting4`）：删掉 `debian/links`，不再占 `msm`，只留
+  `v4l2_drv_video.so`——snap Chromium 登录时拷进 snap 的就是它。`Depends: qcom-va-driver (>=
+  …0diting6)`，免得装了它却没有默认驱动。
+- `make rootfs` 依赖 `qcom-va-driver`，`build-rootfs.sh` 把它的 deb 和旧驱动一起装进镜像。
+  `ci/tests.sh` 在构建镜像里 229 项全过。
+
+**手机上**（装了上面两个包，`phone-vaapi-default.sh` 等脚本在工作区 `liuqin-study/scripts/`，日志在
+`liuqin-study/raw/vaenc-eval/default-driver-2026-11-28/`）。全程不设 `LIBVA_DRIVER_NAME`：
+
+| 检查 | 结果 |
+| --- | --- |
+| `vainfo` | 4 个 profile 有编码器、7 个有解码器；`LIBVA_DRIVER_NAME=v4l2` 仍是旧驱动（0 编码、7 解码） |
+| 包里的测试，原样（它们打开的就是默认驱动） | `api-smoke`、`i420-surface`（H.264、HEVC）、`rate-change`、`async` 20 遍、`async-dump` 20 轮，全过 |
+| ffmpeg 解码，七条流 | 全部与软件解码逐帧一致，含 10-bit 的 P010 |
+| ffmpeg 编码，CBR 要 2000 kbit/s | H.264 1999、HEVC 1996 |
+| 解码加编码一条命令（H.264 → HEVC，1080p 150 帧） | 1.8 秒，对源 PSNR 42.7 dB |
+| 10-bit 4K 用 `scale_vaapi` 缩放并转 8-bit | 不行，见下面“没有视频处理器” |
+| deb Chromium 硬解 | H.264、HEVC、HEVC Main10 4K、VP9、VP9 profile 2：约 30 帧/秒，丢帧 0，画面与软件解码的一致 |
+| Firefox 硬解 | 解码节点开着，驱动报约 31 帧/秒，画面与旧驱动时相同；开头十几秒丢 7–8% 的帧，旧驱动下一样多 |
+| RustDesk 自检 | `Encoder h264_vaapi test passed on attempt 1`，不再需要 drop-in（已删） |
+| 内核日志 | 全程零行 |
+
+浏览器那一项的做法：本机起一个只在测试期间存在的 http 服务，页面、视频、接收端同一个源；页面循环
+播放，隔几秒把画面画到 canvas 上，连同 `getVideoPlaybackQuality()` 的数字 POST 回来。Chromium 的截图
+和软件解码的同一帧构图一致（六条彩条、移动的斜线、灰块）。
+
+**Chromium 换成 deb。** 机主指定用 XtraDEB 的 PPA（`ppa:xtradeb/apps`，有 `resolute` 的 arm64 包）：
+`chromium 156.0.8078.108-1xtradeb1.2604.1`，和 snap 的 158 并存。Ubuntu 自己的仓库里只有装 snap 的那个
+过渡包；Debian 的 deb 在这台手机上缺三个依赖装不上。deb 版直接读主机的库，所以用默认驱动；硬解的参数
+放在 `/etc/chromium.d/zz-diting-vaapi`（内容和 snap 的 `~/.chromium-browser.init` 一样，手机上是
+手写的，还没进包）。snap 版走不了默认名，继续用它自己那份旧驱动。
+
+**这个驱动构建没有视频处理器。** 打包时关掉了 GPU 拷贝和 CDSP、Vulkan 两个后端，所以没有
+`VAEntrypointVideoProc`，ffmpeg 的 `scale_vaapi` 报 `Failed to create processing pipeline
+config: 12`。缩放和 10→8-bit 的转换走 CPU：`hwdownload,format=p010le,scale=1920:1080,format=nv12,hwupload`
+（4K Main10 转 1080p H.264，150 帧 8.2 秒）。一直如此，不是这次改的。
+
+**还没做的**：
+
+- 镜像层面把 snap Chromium 换成 deb：PPA 进根文件系统、`chromium.d` 的片段进包、snapd 去留、
+  `libva-v4l2-stateful` 去留（deb Chromium 验证过了，旧驱动就只剩 snap 这一个使用者）。手机上
+  snap 也还在。
+- snap 里那份 158 的配置迁到 156：Chromium 的配置不能降级用，得导出书签、密码，或者靠同步。
+- `rate-change.cpp:61` 的编译警告（补丁 0002 的测试里），报上游前清掉。

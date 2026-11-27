@@ -22,7 +22,8 @@ with a device patch series.
 | --- | --- | --- |
 | `kernel/patches/`, `kernel/config/` | Linux 7.2.10 patch series and config fragment | GPL-2.0 (kernel) |
 | `ubuntu-diting/` | build system, Debian packaging, device package, install scripts | GPL-2.0-or-later |
-| `ubuntu-diting/packages/libva-v4l2-stateful/` | patches for [libva-v4l2-stateful](https://github.com/sky1-linux/libva-v4l2-stateful) (VA-API over V4L2, iris decoder) | MIT (upstream) |
+| `ubuntu-diting/packages/qcom-va-driver/` | patches for [qcom-va-driver](https://github.com/radxa-pkg/qcom-va-driver) (VA-API over V4L2: iris encoder and decoders; the default VA-API driver) | MIT (upstream) |
+| `ubuntu-diting/packages/libva-v4l2-stateful/` | patches for [libva-v4l2-stateful](https://github.com/sky1-linux/libva-v4l2-stateful) (VA-API over V4L2, iris decoder; kept for snap Chromium's own copy) | MIT (upstream) |
 | `ubuntu-diting/packages/libcamera/`, `phoc/`, `hexagonrpc/` | patches for Ubuntu's libcamera and phoc and for hexagonrpc | upstream licences (LGPL-2.1+, GPL-3.0+, GPL-3.0+) |
 | `ubuntu-diting/packages/audio-topology/` | AudioReach topology for the speakers | BSD-3-Clause macros from linux-msm/audioreach-topology |
 | `tools/` | firmware builder, Android super parser, ACDB/topology, camera, DSP and IMS tools | GPL-2.0-or-later |

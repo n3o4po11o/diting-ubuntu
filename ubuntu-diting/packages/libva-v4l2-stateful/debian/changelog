@@ -1,3 +1,12 @@
+libva-v4l2-stateful (0.1.0+git6447ebb-0diting4) resolute; urgency=medium
+
+  * msm_drv_video.so is no longer installed. qcom-va-driver, which this
+    package now depends on, takes the msm name as of 1.1.1+gitee8622c-0diting6,
+    so the default VA-API driver decodes and encodes. What remains under
+    v4l2_drv_video.so is for snap Chromium's own copy (diting-chromium-vaapi).
+
+ -- ubuntu-diting local build <ubuntu-diting@localhost>  Sat, 28 Nov 2026 00:15:39 +0800
+
 libva-v4l2-stateful (0.1.0+git6447ebb-0diting3) resolute; urgency=medium
 
   * udev rule: symlink /dev/video-dec0 to the iris decoder. The driver opens

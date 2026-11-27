@@ -16,15 +16,19 @@ Rules-Requires-Root: no
 Package: qcom-va-driver
 Architecture: arm64
 Depends: ${shlibs:Depends}, ${misc:Depends}
+Breaks: libva-v4l2-stateful (<< 0.1.0+git6447ebb-0diting4)
+Replaces: libva-v4l2-stateful (<< 0.1.0+git6447ebb-0diting4)
 Description: VA-API driver with an encoder for the Qualcomm iris video core (Diting)
  VA-API backend on Qualcomm Iris through the V4L2 stateful encoder and
  decoders, for the Xiaomi 12T Pro (diting): H.264 (Constrained Baseline,
- Main, High) and HEVC Main encoding in hardware, CQP, CBR or VBR, for
- VA-API applications.
+ Main, High) and HEVC Main encoding in hardware, CQP, CBR or VBR, and
+ H.264, HEVC and VP9 decoding, for VA-API applications.
  .
- Installed as qcom_drv_video.so and nothing else. A program selects it with
- LIBVA_DRIVER_NAME=qcom; without that, it gets libva-v4l2-stateful, which
- keeps the msm and v4l2 driver names and decodes for the browsers.
+ Installed as qcom_drv_video.so and as msm_drv_video.so, the name libva
+ derives from the msm DRM driver: it is the default driver, and a program
+ gets its encoder and decoders without LIBVA_DRIVER_NAME. Since 2026-11-28;
+ before that libva-v4l2-stateful held that name and this one was selected
+ with LIBVA_DRIVER_NAME=qcom.
 
 Package: qcom-va-driver-tests
 Section: misc
@@ -34,5 +38,5 @@ Depends: qcom-va-driver (= ${binary:Version}), ${shlibs:Depends}, ${misc:Depends
 Description: Hardware tests of qcom-va-driver
  The tests of upstream qcom-va-driver, to run on the phone against its own
  video core: the encoder ones (api-smoke, async, ffmpeg-smoke.py) and the
- decoder ones. In /usr/libexec/qcom-va-driver/tests; they take the driver
- from LIBVA_DRIVER_NAME=qcom.
+ decoder ones. In /usr/libexec/qcom-va-driver/tests; they open the default
+ driver, the msm name.

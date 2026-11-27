@@ -25,7 +25,8 @@ linux-diting/
 └── ubuntu-diting/
     ├── Makefile, config/    diting.conf, kernel.lock, package lists, apt keys
     ├── scripts/             build, inspect and verify scripts
-    ├── packages/            device-xiaomi-diting, diting-firmware-setup, libva-v4l2-stateful,
+    ├── packages/            device-xiaomi-diting, diting-firmware-setup, qcom-va-driver,
+    │                        libva-v4l2-stateful,
     │                        hexagonrpc, libcamera, phoc, audio-topology (debian/ + patches),
     │                        cellular-settings (a GTK 4 app in Rust, its own sources)
     ├── release/             flash script and install guide shipped with images; add-ssh-key.sh (local only)

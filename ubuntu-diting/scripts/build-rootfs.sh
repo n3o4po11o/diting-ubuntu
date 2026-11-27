@@ -24,8 +24,9 @@ DEBS=("$OUT"/debs/linux-image-"$KERNEL_RELEASE"_*-"$KERNEL_DEB_REVISION"_arm64.d
 	"$(latest 'device-xiaomi-diting_*_all.deb')"
 	"$(latest 'diting-firmware-setup_*_arm64.deb')"
 	"$(latest 'libva-v4l2-stateful_*_arm64.deb')"
+	"$(latest 'qcom-va-driver_*_arm64.deb')"
 	"$(latest 'cellular-settings_*_arm64.deb')")
-for d in "${DEBS[@]}"; do [ -f "$d" ] || die "missing $d; run 'make kernel packages cellular-settings' first"; done
+for d in "${DEBS[@]}"; do [ -f "$d" ] || die "missing $d; run 'make kernel packages vaapi qcom-va-driver cellular-settings' first"; done
 # Device-signed firmware built locally by 'make firmware': owner images only.
 # Public images get it on the phone itself (diting-firmware-setup).
 FW_DEBS=("$(latest 'firmware-xiaomi-diting_*_all.deb')")
@@ -152,7 +153,7 @@ cp "${DEBS[@]}" "${FW_DEBS[@]}" "${RPC_DEBS[@]}" "${HRPC_DEBS[@]}" "${SSC_DEBS[@
 # when the kernel postinst runs update-initramfs.
 in_root apt-get -y install --reinstall --no-install-recommends "/tmp/debs/${DEBS[1]##*/}"
 in_root apt-get -y install --reinstall --no-install-recommends "/tmp/debs/${DEBS[0]##*/}"
-in_root apt-get -y install --reinstall --no-install-recommends "/tmp/debs/${DEBS[2]##*/}" "/tmp/debs/${DEBS[3]##*/}" "/tmp/debs/${DEBS[4]##*/}"
+in_root apt-get -y install --reinstall --no-install-recommends "/tmp/debs/${DEBS[2]##*/}" "/tmp/debs/${DEBS[3]##*/}" "/tmp/debs/${DEBS[4]##*/}" "/tmp/debs/${DEBS[5]##*/}"
 [ ${#FW_DEBS[@]} -eq 0 ] ||
 	in_root apt-get -y install --reinstall --no-install-recommends "/tmp/debs/${FW_DEBS[0]##*/}"
 [ ${#RPC_DEBS[@]} -eq 0 ] ||
