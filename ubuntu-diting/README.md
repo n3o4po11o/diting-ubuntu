@@ -26,7 +26,8 @@ linux-diting/
     ├── Makefile, config/    diting.conf, kernel.lock, package lists, apt keys
     ├── scripts/             build, inspect and verify scripts
     ├── packages/            device-xiaomi-diting, diting-firmware-setup, libva-v4l2-stateful,
-    │                        hexagonrpc, libcamera, phoc, audio-topology (debian/ + patches)
+    │                        hexagonrpc, libcamera, phoc, audio-topology (debian/ + patches),
+    │                        cellular-settings (a GTK 4 app in Rust, its own sources)
     ├── release/             flash script and install guide shipped with images; add-ssh-key.sh (local only)
     ├── docs/
     ├── work/                temporary (git-ignored)
@@ -42,6 +43,7 @@ make sources               # clone + signature-check v7.2.10 (the kernel alone)
 make kernel packages       # linux-image-*.deb, device-xiaomi-diting, fastrpc, hexagonrpcd
 make vaapi firmware-setup  # VA-API driver, first-boot firmware extraction (arm64 chroot)
 make ffmpeg               # ffmpeg + ffprobe for /usr/local/bin of the rootfs (ci/FFMPEG.md)
+make cellular-settings    # Cellular Settings, the app for the modem's network settings
 make release               # public image: rootfs (sudo) + boot images, packed for download
 ```
 
@@ -66,6 +68,14 @@ the machine the CI artifact is downloaded to, done in a container (docker:
 nothing runs as root on the machine and nothing is mounted there); the
 workflow neither runs the script nor ships it. `docs/OWNER_IMAGE.md` has
 the steps, `ci/BUILD.md` the artifacts.
+
+Every rootfs also has Cellular Settings (`make cellular-settings`,
+`packages/cellular-settings/README.md`), the app in which the modem's
+network mode, network preference and mobile data connections are set and
+kept for the next boot. Those settings are each phone's own and no package
+carries them: a rootfs installed again starts without them, and a modem on
+a network with no 2G/3G of its own then drops off every few minutes until
+they are set again (`docs/KNOWN_ISSUES.md`).
 
 Some packages still need an arm64 host because they build inside a copy of
 the rootfs: `make sensors`, `make libcamera`, `make phoc`, `build-fastrpc.sh`,

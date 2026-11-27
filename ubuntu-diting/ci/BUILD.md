@@ -156,7 +156,7 @@ The last column is the reference run.
 | `sources` | `make sources` | The signed kernel tag, its signature verified, and nothing else: each later stage fetches the trees it needs itself. | 1.5 min |
 | `kernel` | `make kernel` | Export, the kernel patches, Image, DTBs, modules, the `linux-image` package. | 49 min |
 | `packages` | `make packages` | `device-xiaomi-diting`, fastrpc, hexagonrpcd. | 41 s |
-| `rootfs` | `make rootfs` | Its prerequisites first (VA-API driver, firmware-setup, mobile-config-firefox, ModemManager, phosh, each in an arm64 build chroot; and since 2026-11-27 the ffmpeg in the same chroot, `ci/FFMPEG.md`), then the owner rootfs and its image, with the ffmpeg and ffprobe in `/usr/local/bin` and the libraries they need. | 40 min |
+| `rootfs` | `make rootfs` | Its prerequisites first (VA-API driver, firmware-setup, mobile-config-firefox, ModemManager, phosh, each in an arm64 build chroot; since 2026-11-27 the ffmpeg in the same chroot, `ci/FFMPEG.md`, and Cellular Settings, a build of Rust and GTK 4 in it, `packages/cellular-settings/README.md`), then the owner rootfs and its image, with the ffmpeg and ffprobe in `/usr/local/bin`, the libraries they need, and Cellular Settings in the app grid. | 40 min before Cellular Settings; on the phone, about 4 minutes for it once the chroot is there |
 | `sensors` | `make sensors` | libssc and iio-sensor-proxy with SSC support. | 3 min |
 | `libcamera` | `make libcamera` | Ubuntu's libcamera with the diting patches. | 14 min |
 | `phoc` | `make phoc` | Ubuntu's phoc with the diting patch. | 4 min |

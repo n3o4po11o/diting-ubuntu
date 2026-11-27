@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=Cellular Settings
+Name[zh_CN]=蜂窝网络设置
+Comment=Network mode, network preference and mobile data connections of the modem
+Comment[zh_CN]=基带的网络模式、网络偏好和移动数据连接
+Exec=cellular-settings
+Icon=io.github.n3o4po11o.cellular-settings
+Terminal=false
+Categories=GNOME;GTK;Settings;HardwareSettings;
+# The user in the desktop session may change the modem and save the choice
+# for the next boot; no password is asked for either
+X-GNOME-UsesNotifications=false
+StartupNotify=true

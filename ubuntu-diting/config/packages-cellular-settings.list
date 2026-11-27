@@ -1,0 +1,20 @@
+# What builds cellular-settings (packages/cellular-settings): the Rust
+# toolchain and the GTK 4 and libadwaita development files of the Ubuntu
+# suite. ci/Dockerfile.cellular-settings installs this list into its image;
+# without docker, scripts/build-cellular-settings.sh has the arm64 buildd
+# chroot install it (lib-buildd.sh). "#" starts a comment.
+#
+# rustc: the gtk4 crate (0.11) needs 1.92 or later; resolute has 1.93. The
+# binary is linked against the release's own libraries, so it is built in the
+# release: its GTK 4 here, and its glibc.
+build-essential pkg-config cargo rustc
+# cargo fetches the crates over TLS, and the base image has no certificates
+ca-certificates
+# the toolkit
+libgtk-4-dev libadwaita-1-dev
+# the Chinese catalog: msgfmt, at build time
+gettext
+# the package, and the check that the binary is an arm64 executable
+dpkg-dev debhelper fakeroot file
+# in the image only: ci/cellular-settings.sh runs make in tmux inside the container
+tmux

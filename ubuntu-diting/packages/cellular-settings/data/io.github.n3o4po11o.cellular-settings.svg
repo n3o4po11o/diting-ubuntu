@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="128" height="128" viewBox="0 0 128 128">
+  <title>Cellular Settings</title>
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#62a0ea"/>
+      <stop offset="1" stop-color="#3584e4"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" ry="28" fill="url(#sky)"/>
+  <!-- the broadcast tower: the waves it sends, the top, the mast, the foot -->
+  <g fill="none" stroke="#ffffff" stroke-width="7" stroke-linecap="round">
+    <path d="M38 49 a37 37 0 0 1 52 0"/>
+    <path d="M50 61 a20 20 0 0 1 28 0"/>
+  </g>
+  <circle cx="64" cy="73" r="8" fill="#ffffff"/>
+  <path d="M60.5 80 L52 108 H76 L67.5 80 Z" fill="#ffffff"/>
+  <rect x="44" y="108" width="40" height="7" rx="3.5" fill="#ffffff"/>
+</svg>

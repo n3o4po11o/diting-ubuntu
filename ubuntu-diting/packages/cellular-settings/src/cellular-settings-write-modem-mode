@@ -1,0 +1,121 @@
+#!/bin/sh
+# cellular-settings-write-modem-mode: save, or forget, /etc/diting/modem-mode
+# for Cellular Settings, as root through pkexec.
+#
+#   cellular-settings-write-modem-mode           the new file on standard input
+#   cellular-settings-write-modem-mode --check   check standard input and print it back; write nothing
+#   cellular-settings-write-modem-mode --delete  remove the file
+#
+# The file is read by diting-modem-setup at every boot, and by the redial
+# watchdog once a minute, as root, by sourcing it as shell code. So nothing
+# may be in it but the four assignments that script knows, each a word in
+# double quotes, and plain comments; anything else is refused here, whole.
+#
+# Exit 0 when done, 1 with the reason on standard error. Not authorized to
+# run this: polkit says so through pkexec, not here.
+set -eu
+
+file=/etc/diting/modem-mode
+name=cellular-settings-write-modem-mode
+
+bad() { echo "$name: $*" >&2; exit 1; }
+
+# --check may run as anyone: it writes nothing
+check=0
+delete=0
+case "${1:-}" in
+--delete) delete=1 ;;
+--check) check=1 ;;
+"") ;;
+*) bad "unknown argument '$1'" ;;
+esac
+[ "$check" = 1 ] || [ "$(id -u)" = 0 ] || bad "not root: run me through pkexec"
+if [ "$delete" = 1 ]; then
+	rm -f "$file"
+	echo "$name: removed $file"
+	exit 0
+fi
+
+content=$(cat)
+[ -n "$content" ] || bad "the file would be empty"
+
+# printable ASCII only: no carriage return, no tab, no other alphabet
+if printf '%s\n' "$content" | LC_ALL=C grep -q '[^ -~]'; then
+	bad "only printable ASCII, one assignment or comment per line"
+fi
+# every line: a comment, blank, or one of the four assignments in double
+# quotes, the value of small letters, digits, the pipe and the hyphen (the
+# domain words have one). What is left over is refused.
+rest=$(printf '%s\n' "$content" |
+	grep -v -E '^(#.*|[[:space:]]*|(allowed|preferred|usage|service_domain)="[a-z0-9|-]*")$' || true)
+[ -z "$rest" ] || bad "a line is not a comment or one of allowed, preferred, usage, service_domain"
+
+value() { printf '%s\n' "$content" | sed -n "s/^$1=\"\(.*\)\"$/\1/p"; }
+given() { printf '%s\n' "$content" | grep -c "^$1=\"" || true; }
+
+for key in allowed preferred usage service_domain; do
+	n=$(given "$key")
+	[ "$n" -le 1 ] || bad "$key is given $n times"
+done
+
+allowed=$(value allowed)
+[ -n "$allowed" ] || bad "allowed is missing"
+case "$allowed" in
+''|'||'*|*'||'*|*'|') bad "allowed has an empty technology" ;;
+esac
+
+# the technologies, one word each, as diting-modem-setup splits them: the
+# value has letters, digits and the pipe only, so nothing here can glob
+oldifs=$IFS
+IFS='|'
+set -f
+# shellcheck disable=SC2086
+set -- $allowed
+set +f
+IFS=$oldifs
+for technology in "$@"; do
+	case "$technology" in
+	2g|3g|4g|5g) ;;
+	*) bad "'$technology' is not a technology diting-modem-setup knows (2g, 3g, 4g, 5g)" ;;
+	esac
+done
+while [ "$#" -gt 1 ]; do
+	first=$1
+	shift
+	for other in "$@"; do
+		[ "$first" != "$other" ] || bad "a technology is given twice in allowed"
+	done
+done
+
+preferred=$(value preferred)
+if [ -n "$preferred" ]; then
+	case "|$allowed|" in
+	*"|$preferred|"*) ;;
+	*) bad "preferred must be one of the technologies allowed" ;;
+	esac
+fi
+case "$(value usage)" in
+''|voice|data) ;;
+*) bad "usage must be voice or data" ;;
+esac
+case "$(value service_domain)" in
+''|cs-only|ps-only|cs-ps|cs-attach|ps-detach) ;;
+*) bad "service_domain must be one of cs-only, ps-only, cs-ps, cs-attach, ps-detach" ;;
+esac
+
+if [ "$check" = 1 ]; then
+	printf '%s\n' "$content"
+	exit 0
+fi
+
+# written beside the file and renamed into place: whoever sources the file
+# next finds it whole, either the old one or this one
+umask 022
+[ -d /etc/diting ] || mkdir -m 755 /etc/diting
+tmp=$(mktemp "$file.XXXXXX")
+trap 'rm -f "$tmp"' EXIT
+printf '%s\n' "$content" > "$tmp"
+chmod 644 "$tmp"
+mv -f "$tmp" "$file"
+trap - EXIT
+echo "$name: saved $file"

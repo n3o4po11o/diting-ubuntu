@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.n3o4po11o.cellular-settings</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-2.0-or-later</project_license>
+  <name>Cellular Settings</name>
+  <name xml:lang="zh-CN">蜂窝网络设置</name>
+  <summary>Network mode, network preference and mobile data connections of the modem</summary>
+  <summary xml:lang="zh-CN">基带的网络模式、网络偏好和移动数据连接</summary>
+  <description>
+    <p>
+      What the desktop's settings leave out for the cellular modem: the
+      technologies the modem may use, with 4G and 5G alone among them; how
+      the modem asks the network for service, which has to be "EPS only,
+      data-centric" on a network without a circuit-switched domain; the last
+      reason the network gave for a refusal; and the mobile data connections,
+      with their access point and how often they are dialled.
+    </p>
+    <p>
+      The choice can be kept for the next boot. The status of the modem, the
+      network and the device is shown as it changes.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.n3o4po11o.cellular-settings.desktop</launchable>
+  <url type="homepage">https://github.com/royka1/diting-ubuntu</url>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1" date="2026-11-26">
+      <description><p>First version.</p></description>
+    </release>
+  </releases>
+</component>

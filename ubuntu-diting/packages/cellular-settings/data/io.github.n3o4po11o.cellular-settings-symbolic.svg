@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <title>Cellular Settings</title>
+  <!-- a broadcast tower, in the colour of the text around it -->
+  <g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+    <path d="M3.2 6.2 a6.8 6.8 0 0 1 9.6 0"/>
+    <path d="M5.5 8.5 a3.5 3.5 0 0 1 5 0"/>
+  </g>
+  <circle cx="8" cy="9.6" r="1.5" fill="currentColor"/>
+  <path d="M7.3 10.9 L6.2 14.6 H9.8 L8.7 10.9 Z" fill="currentColor"/>
+</svg>

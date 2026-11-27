@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+
+  <!-- Cellular Settings saves the network mode and the network preference
+       for the next boot by running this helper as root through pkexec. The
+       file it writes, /etc/diting/modem-mode, only says what the modem is
+       told at boot; changing the modem itself needs no privilege in the
+       desktop session (ModemManager's own rule), so saving the choice is
+       allowed there without a password as well. Over SSH it is refused. -->
+
+  <action id="io.github.n3o4po11o.cellular-settings.write-modem-mode">
+    <description>Save the cellular settings for the next boot</description>
+    <description xml:lang="zh-Hans-CN">保存蜂窝网络设置，下次开机生效</description>
+    <message>Authentication is required to save the cellular settings for the next boot</message>
+    <message xml:lang="zh-Hans-CN">保存下次开机的蜂窝网络设置需要认证</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/cellular-settings-write-modem-mode</annotate>
+  </action>
+
+</policyconfig>

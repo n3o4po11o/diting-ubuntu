@@ -81,6 +81,15 @@ if [ -f "$rimg" ]; then
 	t "e2fsprogs installed (root fsck binaries source)" grep -qx 'Package: e2fsprogs' <<<"$st"
 	t "local linux-image-$KERNEL_RELEASE installed" grep -qx "Package: linux-image-$KERNEL_RELEASE" <<<"$st"
 	t "device-xiaomi-diting installed" grep -qx 'Package: device-xiaomi-diting' <<<"$st"
+	t "cellular-settings installed" grep -qx 'Package: cellular-settings' <<<"$st"
+	# Cellular Settings: its program, the helper that writes the file for the
+	# next boot (polkit runs it as root: it must stay executable), its launcher,
+	# its polkit action, and the Chinese catalog
+	t "/usr/bin/cellular-settings is in the image, mode 755" sh -c "debugfs -R 'stat /usr/bin/cellular-settings' '$rimg' 2>&1 | grep -q 'Type: regular.*Mode:  *0755 '"
+	t "/usr/libexec/cellular-settings-write-modem-mode is in the image, mode 755" sh -c "debugfs -R 'stat /usr/libexec/cellular-settings-write-modem-mode' '$rimg' 2>&1 | grep -q 'Type: regular.*Mode:  *0755 '"
+	t "cellular-settings launcher is in the image" sh -c "debugfs -R 'stat /usr/share/applications/io.github.n3o4po11o.cellular-settings.desktop' '$rimg' 2>&1 | grep -q 'Type: regular'"
+	t "cellular-settings polkit action is in the image" sh -c "debugfs -R 'stat /usr/share/polkit-1/actions/io.github.n3o4po11o.cellular-settings.policy' '$rimg' 2>&1 | grep -q 'Type: regular'"
+	t "cellular-settings Chinese catalog is in the image" sh -c "debugfs -R 'stat /usr/share/locale/zh_CN/LC_MESSAGES/cellular-settings.mo' '$rimg' 2>&1 | grep -q 'Type: regular'"
 	t "no generic Ubuntu kernel installed" sh -c '! grep -q "^Package: linux-image-.*-generic"' <<<"$st"
 	t "no apk/OpenRC in rootfs" sh -c '! grep -qE "^Package: (apk-tools|openrc)$"' <<<"$st"
 	t "apt sources signed official ports archive" sh -c "debugfs -R 'cat /etc/apt/sources.list.d/ubuntu.sources' '$rimg' 2>/dev/null | grep -q 'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg'"

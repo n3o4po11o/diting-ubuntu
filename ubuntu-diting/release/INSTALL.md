@@ -73,8 +73,15 @@ does not work. Details: `docs/KNOWN_ISSUES.md` in the source repository.
 
 - Connect to Wi-Fi in Settings. Updates: `sudo apt update && sudo apt upgrade`
   (Ubuntu packages; the kernel and device packages come from the release).
-- Mobile data: set the APN in Settings → Mobile Network, or
+- Mobile data: set the APN in Settings → Mobile Network, or on the Mobile
+  data page of the Cellular Settings app, or
   `nmcli c add type gsm ifname '*' con-name mobile gsm.apn <your-apn>`.
+- Network mode and network preference: the Network page of Cellular
+  Settings. Turn on "Keep for next boot" there, or the choice lasts only
+  until the next boot. On a carrier with no 2G/3G network of its own
+  (China Telecom, for one) choose "EPS only, data-centric": without it the
+  network refuses the modem ("CS domain not available") and it drops off
+  the network every few minutes.
 - SSH is installed but accepts keys only: put your key into
   `~/.ssh/authorized_keys` first. Over USB the phone appears as a network
   adapter; it is 172.16.42.1, the computer takes 172.16.42.2.

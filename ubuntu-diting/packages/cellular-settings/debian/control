@@ -1,0 +1,30 @@
+Source: cellular-settings
+Section: utils
+Priority: optional
+Maintainer: royka1 <397414+royka1@users.noreply.github.com>
+Build-Depends: debhelper-compat (= 13),
+ build-essential,
+ cargo,
+ rustc (>= 1.92),
+ pkg-config,
+ libgtk-4-dev,
+ libadwaita-1-dev,
+ gettext,
+ dpkg-dev
+Standards-Version: 4.7.0
+Homepage: https://github.com/royka1/diting-ubuntu
+Rules-Requires-Root: no
+
+Package: cellular-settings
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, pkexec, polkitd
+Recommends: modemmanager, network-manager
+Description: Network mode, network preference and mobile data of the modem
+ A GTK 4 and libadwaita window for what the desktop's settings leave out for
+ the cellular modem: the technologies the modem may use, 4G and 5G alone
+ among them; how the modem asks the network for service (the EPS UE mode of
+ operation, "EPS only, data-centric" on a network without a circuit-switched
+ domain); the last reason the network gave for a refusal; and the mobile data
+ connections with their access point. The choice can be kept for the next
+ boot: the helper of the package writes /etc/diting/modem-mode, which
+ diting-modem-setup reads, as root through pkexec.

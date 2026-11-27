@@ -19,5 +19,5 @@ shebang='^#!([^ ]*/)?(env +)?(ba|da|k)?sh( |$)'
 grep -rIlE "$shebang" \
 	"$UD"/ci "$UD"/scripts "$UD"/release \
 	"$D"/src "$D"/initramfs-tools/hooks "$D"/initramfs-tools/scripts/init-top \
-	"$D"/etc/zz-diting-bootimg |
+	"$D"/etc/zz-diting-bootimg "$UD"/packages/cellular-settings/src |
 	sort | xargs -r shellcheck -x -S error

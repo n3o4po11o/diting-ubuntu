@@ -631,5 +631,129 @@ check test -z "$missing"
 rm -rf "$R"
 
 echo
+echo "== 14. the helper of Cellular Settings that writes /etc/diting/modem-mode"
+# The file is sourced as shell code, by root, once a minute: --check must
+# accept what diting-modem-setup reads and nothing else. --check writes
+# nothing and runs as anyone; the writing itself is tried on the phone.
+H="$SRC/ubuntu-diting/packages/cellular-settings/src/cellular-settings-write-modem-mode"
+good='allowed="3g|4g|5g"
+preferred="5g"
+usage="data"
+service_domain="ps-only"'
+printf '%s\n' "$good" | sh "$H" --check >"$W/out.txt" 2>"$W/err.txt"
+rc_is 0 "$?"
+checkdesc="--check prints a good file back as it is"
+check test "$(cat "$W/out.txt")" = "$good"
+checkdesc="--check says nothing of a good file"
+check test ! -s "$W/err.txt"
+rm -f "$W/err.txt"
+refused() { # refused <what> <file>: --check exits with 1 and prints nothing of the file
+	checkdesc="--check refuses: $1"
+	if printf '%s\n' "$2" | sh "$H" --check >"$W/out.txt" 2>&1; then bad "$checkdesc"; else ok "$checkdesc"; fi
+	expect "cellular-settings-write-modem-mode:"
+}
+refused "an empty file" ""
+refused "a command substitution" 'allowed="$(id)"'
+refused "a variable the script does not read" 'allowed="4g"
+evil="x"'
+refused "a value without quotes" 'allowed=4g'
+refused "a technology the script does not know" 'allowed="4g|6g"'
+refused "a hyphen inside a technology" 'allowed="4-g"'
+refused "a preferred technology that is not allowed" 'allowed="4g"
+preferred="5g"'
+refused "a technology twice" 'allowed="4g|4g"'
+refused "an empty technology" 'allowed="4g||5g"'
+refused "allowed given twice" 'allowed="4g"
+allowed="5g"'
+refused "no allowed at all" 'usage="data"'
+refused "two assignments on one line" 'allowed="4g" usage="data"'
+refused "a second command on the line" 'allowed="4g"; id'
+refused "a usage that is no word of the script" 'allowed="4g"
+usage="data|voice"'
+refused "a service domain that is no word of the script" 'allowed="4g"
+service_domain="ps"'
+refused "a line that is not ASCII" '# 中文'
+refused "a carriage return" $'allowed="4g"\r'
+for d in cs-only ps-only cs-ps cs-attach ps-detach; do
+	printf 'allowed="4g"\nservice_domain="%s"\n' "$d" | sh "$H" --check >/dev/null 2>&1
+	checkdesc="--check accepts service_domain=\"$d\""
+	rc_is 0 "$?"
+done
+if [ "$(id -u)" != 0 ]; then
+	printf '%s\n' "$good" | sh "$H" >"$W/out.txt" 2>&1
+	rc_not 0 "$?"
+	expect "not root"
+	sh "$H" --delete >"$W/out.txt" 2>&1
+	rc_not 0 "$?"
+	expect "not root"
+fi
+
+echo
+echo "== 15. build-cellular-settings.sh: which way it builds, by where it runs"
+# Three hosts run the script: its own image, a host with docker, and the
+# builder of the from-zero build, which has neither. The image is tried on
+# the phone; these two are tried here, with stand-ins for docker and for
+# the chroot library, which must not run here (it would debootstrap). The
+# third way was first run on 2026-11-27, and died on the way:
+# "DOCKER: unbound variable" before the chroot, in a tree without docker.
+new_tree
+cp "$SRC"/ubuntu-diting/scripts/build-cellular-settings.sh "$U/scripts/"
+cp "$SRC"/ubuntu-diting/config/packages-cellular-settings.list "$U/config/"
+mkdir -p "$U/packages/cellular-settings"
+echo x >"$U/packages/cellular-settings/Cargo.toml"
+cat >"$U/scripts/lib-buildd.sh" <<'LB'
+# Stand-in for the chroot library: records what it is asked for
+CH=stand-in
+buildd_setup() { echo "buildd_setup" >>"${TEST_TOP:?}/buildd.log"; }
+buildd_build() { echo "buildd_build $*" >>"${TEST_TOP:?}/buildd.log"; }
+LB
+cat >"$U/ci/cellular-settings.sh" <<'CS'
+#!/bin/bash
+echo "cellular-settings.sh $*" >>"${TEST_TOP:?}/driver.log"
+CS
+chmod +x "$U/ci/cellular-settings.sh"
+: >"$TEST_TOP/buildd.log"
+: >"$TEST_TOP/driver.log"
+words="$(sed 's/#.*//' "$SRC/ubuntu-diting/config/packages-cellular-settings.list" | tr -s ' \t' '\n' | grep . | tr '\n' ' ')"
+words="${words% }"
+# a PATH with the tools the scripts need up to that point, and no docker
+# (the host's may be anywhere in its PATH)
+mkdir -p "$W/nodocker"
+for t in bash dirname sed tr uname nproc cp rm mkdir; do
+	p="$(command -v "$t" 2>/dev/null)" && ln -sf "$p" "$W/nodocker/$t"
+done
+cellular() { # cellular [--env VAR=value]...: the script, in the throwaway tree
+	local e=() a=()
+	while [ "${1:-}" = --env ]; do e+=("$2"); shift 2; done
+	(cd "$TEST_TOP" && env PATH="$W/nodocker" "${e[@]}" \
+		"$TEST_TOP/ubuntu-diting/scripts/build-cellular-settings.sh" >"$W/out.txt" 2>&1)
+}
+{ echo buildd_setup; echo "buildd_build $U/work/cellular-settings-pkg cellular-settings $words"; } >"$W/want.txt"
+cellular
+rc_is 0 "$?"
+checkdesc="without docker and without \$DOCKER: the chroot, with the words of the list"
+check cmp -s "$W/want.txt" "$TEST_TOP/buildd.log"
+noexpect "unbound variable"
+present "$U/work/cellular-settings-pkg/Cargo.toml"
+checkdesc="without docker: the container driver is not run"
+check test ! -s "$TEST_TOP/driver.log"
+: >"$TEST_TOP/buildd.log"
+cellular --env "DOCKER=sudo -n docker"
+rc_is 0 "$?"
+checkdesc="with \$DOCKER naming a docker that is not there: the chroot all the same"
+check cmp -s "$W/want.txt" "$TEST_TOP/buildd.log"
+noexpect "unbound variable"
+: >"$TEST_TOP/buildd.log"
+(cd "$TEST_TOP" && env PATH="$W/bin:$W/nodocker" \
+	"$TEST_TOP/ubuntu-diting/scripts/build-cellular-settings.sh" >"$W/out.txt" 2>&1)
+rc_is 0 "$?"
+printf 'cellular-settings.sh build\ncellular-settings.sh up\ncellular-settings.sh once make cellular-settings\n' >"$W/want.txt"
+checkdesc="with docker: its container is built, started, and builds in tmux there"
+check cmp -s "$W/want.txt" "$TEST_TOP/driver.log"
+checkdesc="with docker: nothing is asked of the chroot"
+check test ! -s "$TEST_TOP/buildd.log"
+rm -rf "$W/nodocker"
+
+echo
 echo "passed: $pass, failed: $fail"
 [ "$fail" = 0 ]

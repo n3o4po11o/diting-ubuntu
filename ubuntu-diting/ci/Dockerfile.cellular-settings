@@ -1,0 +1,53 @@
+# Build environment for Cellular Settings (packages/cellular-settings): the
+# Ubuntu suite of the image, on arm64, with the Rust toolchain and the GTK 4
+# and libadwaita development files. The binary is linked against the libraries
+# of the release it will run on, because this is that release.
+# ci/cellular-settings.sh drives it; packages/cellular-settings/README.md has
+# the whole build.
+#
+#   ubuntu-diting/ci/cellular-settings.sh build      build the image for this checkout
+#   ubuntu-diting/ci/cellular-settings.sh up         start the container, the checkout at /src
+#   ubuntu-diting/ci/cellular-settings.sh make cellular-settings   a Makefile target, in tmux
+#
+# On an arm64 host (the phone itself, a hosted arm64 runner) everything runs
+# natively. On another architecture docker runs the image under qemu-user,
+# whose binfmt entry has to be registered on the host; that has not been
+# tried. The dependencies come from config/packages-cellular-settings.list,
+# the list the arm64 buildd chroot installs as well
+# (scripts/build-cellular-settings.sh): both ways build against the same
+# packages. The container is not privileged: it writes in work/ and output/
+# of the checkout and chroots nowhere. /usr/share/diting-cellular-settings-packages.tsv
+# in the image lists what it contains.
+#
+# The base image is pinned by the digest of its multi-arch index (ubuntu:26.04,
+# 2026-11-27); ci/cellular-settings.sh builds from a context with the three
+# files this needs, not from the whole tree.
+FROM --platform=linux/arm64 ubuntu:26.04@sha256:d66b366dac61b575bee2aef07e9c26e8070096fbe84a3d4d3eb0da069b5d76db
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG VCS_REF=unknown
+
+COPY packages-cellular-settings.list /tmp/packages
+RUN apt-get update \
+	&& sed 's/#.*//' /tmp/packages | tr -s ' \t\n' '\n' | grep . \
+		| xargs apt-get install -y --no-install-recommends \
+	&& rm -rf /var/lib/apt/lists/* /tmp/packages
+
+# diting-kernel-entrypoint: at container start, give the uid that owns the
+# checkout a name and a home, so that cargo, dpkg and tmux behave as usual
+# under `docker exec -u` (the container itself runs as root for that one step).
+# diting-kernel-make: what the `make` of ci/cellular-settings.sh runs inside tmux.
+COPY diting-kernel-entrypoint diting-kernel-make /usr/local/sbin/
+RUN chmod 755 /usr/local/sbin/diting-kernel-entrypoint /usr/local/sbin/diting-kernel-make
+
+# What scripts/build-cellular-settings.sh looks for: this is its container.
+RUN touch /etc/cellular-settings-builder \
+	&& dpkg-query -W -f='${Package}\t${Version}\n' > /usr/share/diting-cellular-settings-packages.tsv
+
+LABEL org.opencontainers.image.title="diting-cellular-settings" \
+	org.opencontainers.image.description="Build environment for cellular-settings (Ubuntu of the image on arm64: Rust, GTK 4 and libadwaita development files)" \
+	org.opencontainers.image.revision="${VCS_REF}"
+
+WORKDIR /src/ubuntu-diting
+ENTRYPOINT ["/usr/local/sbin/diting-kernel-entrypoint"]
+CMD ["sleep", "infinity"]

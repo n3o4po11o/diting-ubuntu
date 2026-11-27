@@ -1,0 +1,9 @@
+build/cellular-settings usr/bin
+# the catalogs' directories, not the directory of them: usr/share/locale/zh_CN/...
+build/locale/* usr/share/locale
+src/cellular-settings-write-modem-mode usr/libexec
+data/io.github.n3o4po11o.cellular-settings.desktop usr/share/applications
+data/io.github.n3o4po11o.cellular-settings.metainfo.xml usr/share/metainfo
+data/io.github.n3o4po11o.cellular-settings.policy usr/share/polkit-1/actions
+data/io.github.n3o4po11o.cellular-settings.svg usr/share/icons/hicolor/scalable/apps
+data/io.github.n3o4po11o.cellular-settings-symbolic.svg usr/share/icons/hicolor/symbolic/apps

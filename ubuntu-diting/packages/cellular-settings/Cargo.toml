@@ -1,0 +1,24 @@
+[package]
+name = "cellular-settings"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.92"
+description = "Network mode, network preference and mobile data connections of the cellular modem"
+homepage = "https://github.com/royka1/diting-ubuntu"
+license = "GPL-2.0-or-later"
+publish = false
+
+# gtk4 0.11 asks for Rust 1.92; Ubuntu resolute has 1.93.
+[dependencies]
+# gtk4 0.11 asks for Rust 1.92; Ubuntu resolute has 1.93. The version features
+# open what GTK 4.14 and libadwaita 1.9 added (the phone has 4.22 and 1.9):
+# the renderer that writes the snapshot, the rows, the dialogs.
+gtk = { package = "gtk4", version = "0.11", features = ["v4_14"] }
+adw = { package = "libadwaita", version = "0.9", features = ["v1_9"] }
+zbus = "5"
+async-channel = "2"
+gettext-rs = { version = "0.7", features = ["gettext-system"] }
+
+[profile.release]
+lto = "thin"
+strip = true

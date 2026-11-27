@@ -5,7 +5,7 @@ S := scripts
 SUDO ?= sudo -E
 
 .PHONY: help modemmanager phosh check-host sources reference references check-latest-kernel update-kernel kernel dtbs phoc sensors libcamera \
-	dtbs-check packages vaapi ffmpeg firmware-setup mobile-config-firefox firmware rootfs release owner-release initramfs boot image verify \
+	dtbs-check packages vaapi ffmpeg firmware-setup mobile-config-firefox cellular-settings firmware rootfs release owner-release initramfs boot image verify \
 	repro-check qemu-test inspect-device lint clean distclean
 
 help:
@@ -62,6 +62,9 @@ mobile-config-firefox:
 ## firmware-setup       diting-firmware-setup (first-boot firmware extraction; arm64 buildd chroot)
 firmware-setup:
 	$(S)/build-firmware-setup.sh
+## cellular-settings   Cellular Settings, Rust + GTK 4 (ci/Dockerfile.cellular-settings; without docker, the arm64 buildd chroot)
+cellular-settings:
+	$(S)/build-cellular-settings.sh
 ## firmware             firmware package from owner-supplied blobs (local only)
 firmware:
 	$(S)/build-firmware.sh
@@ -75,7 +78,7 @@ libcamera:
 phoc:
 	$(S)/build-phoc.sh
 ## rootfs               Ubuntu rootfs + ext4 image (needs root, uses sudo; ROOTFS_PROFILE=owner|public)
-rootfs: kernel packages vaapi ffmpeg firmware-setup mobile-config-firefox modemmanager phosh
+rootfs: kernel packages vaapi ffmpeg firmware-setup mobile-config-firefox cellular-settings modemmanager phosh
 	$(SUDO) $(S)/build-rootfs.sh
 ## initramfs            regenerate the initramfs inside the rootfs (initramfs-tools)
 initramfs:
@@ -110,7 +113,7 @@ inspect-device:
 	$(S)/inspect-device.sh
 ## lint                 shellcheck + git diff --check
 lint:
-	shellcheck -x $(S)/*.sh packages/device-xiaomi-diting/src/* \
+	shellcheck -x $(S)/*.sh packages/device-xiaomi-diting/src/* packages/cellular-settings/src/cellular-settings-write-modem-mode \
 		packages/device-xiaomi-diting/initramfs-tools/hooks/* \
 		packages/device-xiaomi-diting/initramfs-tools/scripts/init-top/* \
 		packages/device-xiaomi-diting/etc/zz-diting-bootimg

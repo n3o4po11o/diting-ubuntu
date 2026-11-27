@@ -1,0 +1,28 @@
+#!/usr/bin/make -f
+
+# Where cargo keeps what it built. The environment says: the build script of
+# the tree points it into work/, so that a second build in its container
+# compiles what changed only.
+CARGO_TARGET_DIR ?= $(CURDIR)/target
+export CARGO_TARGET_DIR
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+
+override_dh_auto_build:
+	cargo build --release --locked
+	set -e; for po in po/*.po; do \
+		lang=`basename $$po .po`; \
+		install -d build/locale/$$lang/LC_MESSAGES; \
+		msgfmt $$po -o build/locale/$$lang/LC_MESSAGES/cellular-settings.mo; \
+	done
+	install -D -m 0755 $(CARGO_TARGET_DIR)/release/cellular-settings build/cellular-settings
+
+override_dh_auto_test:
+	cargo test --release --locked
+
+override_dh_auto_clean:
+	dh_auto_clean
+	rm -rf build target
