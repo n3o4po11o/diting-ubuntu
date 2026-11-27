@@ -1,0 +1,24 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@ --buildsystem=meson
+
+# gpu_copy, cdsp_vpp and vulkan_vpp off: what this driver is for is encoding
+# over the iris encoder (docs/VIDEO_ENCODE.md), and a surface that cannot go
+# to the encoder as it is is copied on the CPU. Those would add EGL, GLES,
+# GBM and the Vulkan loader to what the driver loads - in snap Chromium, which
+# has its own Mesa, none of which is known to resolve (VIDEO_ENCODE.md, 10.8).
+# v4l2_symlink off: the v4l2 name stays with libva-v4l2-stateful. The msm
+# name, which upstream always installs, is taken out again below for the same
+# reason. tests on: the hardware tests go into qcom-va-driver-tests.
+override_dh_auto_configure:
+	dh_auto_configure -- --prefix=/usr \
+		-Dgpu_copy=disabled -Dcdsp_vpp=disabled -Dvulkan_vpp=disabled \
+		-Dv4l2_symlink=false -Dtests=true
+
+# Two binary packages: everything lands in debian/tmp first, and the .install
+# files say what goes where.
+override_dh_auto_install:
+	dh_auto_install --destdir=debian/tmp
+	rm -f debian/tmp/usr/lib/*/dri/msm_drv_video.so
+	rm -rf debian/tmp/usr/share/licenses

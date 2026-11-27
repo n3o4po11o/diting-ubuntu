@@ -1,0 +1,114 @@
+From 2b4a13f1b002c4e326841d58e797cf75541f586f Mon Sep 17 00:00:00 2001
+From: f <f@f>
+Date: Fri, 27 Nov 2026 13:05:00 +0800
+Subject: [PATCH] encoder: stamp the input a frame apart, not a microsecond
+
+The encoder hands the firmware each raw frame with a V4L2 timestamp and
+pairs the coded buffer that comes back by the same timestamp, which the
+firmware copies into it. The stamp was the frame number in
+microseconds: every frame looked a microsecond apart.
+
+The firmware's rate control takes its bit budget from those stamps. It
+read them as a million frames a second and spent nothing. On the Xiaomi
+12T Pro (SM8475, firmware vpu20_4v.mbn) a 720p H.264 session in CBR came
+out at 734 kbit/s whether 1, 4 or 20 Mbit/s were asked for, which is the
+largest QP allowed, and VBR at 4 Mbit/s gave 911 kbit/s. The same
+content encoded over V4L2 directly, with real frame times, gives 4127
+kbit/s at 4 Mbit/s. Switching off every other control the driver sets
+on its own - the header mode, the peak bitrate, the QP range, the frame
+rate, the GOP length - changes none of it; the stamps alone are the
+cause (docs/VIDEO_ENCODE.md).
+
+The frames are now stamped a frame apart at the rate of the session,
+and the stamps run on from one another, so that they stay unique when
+the rate changes. CBR at 4 Mbit/s then gives 3977 kbit/s and at 1 Mbit/s
+998, VBR at 4 Mbit/s 4143 and at 16 Mbit/s 5269 (H.264 High, 720p30,
+testsrc2, 150 frames).
+---
+ src/encoder.cpp | 31 ++++++++++++++++++++++++-------
+ 1 file changed, 24 insertions(+), 7 deletions(-)
+
+diff --git a/src/encoder.cpp b/src/encoder.cpp
+index 42789db..f23ebc6 100644
+--- a/src/encoder.cpp
++++ b/src/encoder.cpp
+@@ -52,6 +52,12 @@ int level_control(unsigned idc) {
+             return i;
+     throw Error(VA_STATUS_ERROR_INVALID_PARAMETER, "unsupported H264 encode level");
+ }
++// Microseconds per frame at the rate of the session, at least one, so that
++// no two frames share a stamp.
++uint64_t frame_interval_us(const EncodeSettings &s) {
++    return std::max<uint64_t>(1, (uint64_t(s.fps_den) * 1000000 + s.fps_num / 2) / s.fps_num);
++}
++
+ int hevc_level_control(unsigned idc) {
+     const unsigned levels[] = {30, 60, 63, 90, 93, 120, 123, 150, 153, 156, 180, 183, 186};
+     for (unsigned i = 0; i < std::size(levels); ++i)
+@@ -342,7 +348,7 @@ struct Encoder::Impl {
+     std::unique_ptr<SurfaceCopier> copier;
+     unsigned width, height, stride = 0, storage_height = 0, input_size = 0, input_count = 0;
+     bool output_on = false, capture_on = false, failed = false;
+-    uint64_t token = 0;
++    uint64_t token = 0, stamp = 0;
+     VASurfaceID last_reference = VA_INVALID_SURFACE;
+     EncodeSettings settings;
+     unsigned entropy;
+@@ -469,9 +475,9 @@ struct Encoder::Impl {
+                       "invalid encoder bitstream range", VA_STATUS_ERROR_ENCODING_ERROR);
+                 unsigned size = q.plane.bytesused - q.plane.data_offset;
+                 if (size) {
+-                    uint64_t token =
++                    uint64_t stamp =
+                         uint64_t(q.buffer.timestamp.tv_sec) * 1000000 + q.buffer.timestamp.tv_usec;
+-                    auto it = jobs.find(token);
++                    auto it = jobs.find(stamp);
+                     check(it != jobs.end() && !it->second->frame_done, "encoder timestamp mismatch",
+                           VA_STATUS_ERROR_ENCODING_ERROR);
+                     auto &job = *it->second;
+@@ -492,7 +498,7 @@ struct Encoder::Impl {
+                 if (job.input_done && job.frame_done) {
+                     job.output->coded_ready = true;
+                     job.task->pending = false;
+-                    trace("encoded token=%llu bytes=%u", (unsigned long long)it->first,
++                    trace("encoded stamp=%llu bytes=%u", (unsigned long long)it->first,
+                           job.output->coded.size);
+                     it = jobs.erase(it);
+                 } else {
+@@ -865,19 +871,30 @@ std::shared_ptr<EncodeTask> Encoder::encode(const EncodeSettings &s, const Encod
+         q.plane.length = memory->size;
+         q.plane.bytesused = e.input_size;
+         const uint64_t token = e.token + 1;
+-        q.buffer.timestamp.tv_sec = token / 1000000;
+-        q.buffer.timestamp.tv_usec = token % 1000000;
++        // The stamp is the handle that pairs a coded buffer with its frame: the
++        // firmware hands it back in the CAPTURE buffer's timestamp. It was the
++        // frame number in microseconds, a microsecond apart per frame. The
++        // firmware's rate control budgets its bits by the stamps it is given,
++        // and read those as a million frames a second: on SM8475 a 720p
++        // session in CBR came out at 734 kbit/s whether 1, 4 or 20 Mbit/s were
++        // asked for, at the largest QP allowed. So the frames are stamped a
++        // frame apart at the rate of the session, and the stamps run on from
++        // one another, to stay unique when the rate changes.
++        const uint64_t stamp = e.stamp + frame_interval_us(s);
++        q.buffer.timestamp.tv_sec = stamp / 1000000;
++        q.buffer.timestamp.tv_usec = stamp % 1000000;
+         auto job = std::make_shared<Impl::Job>();
+         job->task = std::make_shared<EncodeTask>();
+         job->output = coded;
+         job->memory = memory;
+-        e.jobs.emplace(token, job);
++        e.jobs.emplace(stamp, job);
+         e.slots[index] = job;
+         output.encode_task = job->task;
+         output.coded_ready = false;
+         output.coded = {};
+         checked(e.fd, VIDIOC_QBUF, &q.buffer, "encoder QBUF OUTPUT");
+         e.token = token;
++        e.stamp = stamp;
+         e.last_reference = p.reconstruction(s.hevc);
+         trace("encoder queued token=%llu depth=%zu", (unsigned long long)token, e.jobs.size());
+         return job->task;
+-- 
+2.54.0
+

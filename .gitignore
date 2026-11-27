@@ -11,6 +11,9 @@
 # Generated
 /ubuntu-diting/work/
 /ubuntu-diting/output/
+# debootstrap fetches with wget, and run through sudo from the checkout (the chroot builds
+# in ci/ffmpeg.sh) wget keeps its log in the directory it was started in
+/ubuntu-diting/wget-log*
 __pycache__/
 # Host noise
 .DS_Store

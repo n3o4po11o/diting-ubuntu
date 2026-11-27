@@ -1,0 +1,416 @@
+From a3fedd88c3e1b6934e9e833253c25d347f7026fb Mon Sep 17 00:00:00 2001
+From: f <f@f>
+Date: Fri, 27 Nov 2026 13:40:00 +0800
+Subject: [PATCH 2/2] encoder: take a new bit rate and frame rate while the
+ session runs
+
+Upstream refuses a picture whose bit rate, peak or frame rate differs
+from the first one: "changing encoder settings requires a new context"
+(VA_STATUS_ERROR_UNIMPLEMENTED). Chromium does not make a new context
+for that. It changes the bit rate every second or two while a call
+runs, and does not even force a key frame for it: UpdateRates() keeps
+the context and lets the next picture's buffers carry the new values
+(docs/VIDEO_ENCODE.md, 2.6).
+
+The kernel takes both rates at any time (the bitrate and peak controls
+are dynamic, and S_PARM is accepted while streaming), so the driver now
+drains the pipeline and sets them. The drain comes first because the
+controls act on the whole session and not on one buffer: without it the
+frames still queued would be encoded with the new rate. With the input
+stamped a frame apart (the patch before this one), the new frame rate
+reaches the firmware's rate control with the next stamp.
+
+What still needs a new context: the level, the entropy mode, the
+deblocking and the QP range. The kernel refuses the QP range control
+once the stream is on, so it could not be changed even if it were taken.
+
+tests/encoder/rate-change.cpp goes with this one.
+---
+ src/encoder.cpp               |  37 ++++-
+ tests/encoder/meson.build     |   8 +
+ tests/encoder/rate-change.cpp | 290 ++++++++++++++++++++++++++++++++++
+ 3 files changed, 333 insertions(+), 2 deletions(-)
+ create mode 100644 tests/encoder/rate-change.cpp
+
+diff --git a/src/encoder.cpp b/src/encoder.cpp
+index f23ebc6..e213e79 100644
+--- a/src/encoder.cpp
++++ b/src/encoder.cpp
+@@ -414,6 +414,29 @@ struct Encoder::Impl {
+         trace("encoder deblocking mode=%d alpha=%d beta=%d via V4L2", filter[0], filter[1],
+               filter[2]);
+     }
++    // A rate that changed while the session runs. The controls act on the whole
++    // session, not on one buffer, so this is called after a drain.
++    void set_rates(const EncodeSettings &s) {
++        if (settings.rate_control != VA_RC_CQP) {
++            control(V4L2_CID_MPEG_VIDEO_BITRATE, s.bitrate);
++            control(V4L2_CID_MPEG_VIDEO_BITRATE_PEAK, s.peak_bitrate);
++        }
++        // The kernel takes the frame rate down (and checks the level against
++        // it) but does not pass it to the firmware mid-session: the rate the
++        // session started with stays in the stream's timing information. The
++        // stamps below carry the new rate to the rate control regardless.
++        for (unsigned type : {CAPTURE, OUTPUT}) {
++            v4l2_streamparm parm{};
++            parm.type = type;
++            parm.parm.output.timeperframe.numerator = s.fps_den;
++            parm.parm.output.timeperframe.denominator = s.fps_num;
++            checked(fd, VIDIOC_S_PARM, &parm, "encoder S_PARM");
++        }
++        settings.bitrate = s.bitrate;
++        settings.peak_bitrate = s.peak_bitrate;
++        settings.fps_num = s.fps_num;
++        settings.fps_den = s.fps_den;
++    }
+     void queue_capture(unsigned index) {
+         QueueBuffer q(CAPTURE, index);
+         q.plane.length = capture[index]->size;
+@@ -744,10 +767,16 @@ std::shared_ptr<EncodeTask> Encoder::encode(const EncodeSettings &s, const Encod
+                      s.hevc_sequence.general_tier_flag == e.settings.hevc_sequence.general_tier_flag
+                : s.sequence.level_idc == e.settings.sequence.level_idc &&
+                      p.params.pic_fields.bits.entropy_coding_mode_flag == e.entropy) &&
+-              s.fps_num == e.settings.fps_num && s.fps_den == e.settings.fps_den &&
+-              s.bitrate == e.settings.bitrate && s.peak_bitrate == e.settings.peak_bitrate &&
+               s.min_qp == e.settings.min_qp && s.max_qp == e.settings.max_qp,
+           "changing encoder settings requires a new context", VA_STATUS_ERROR_UNIMPLEMENTED);
++    // The bit rate, the peak and the frame rate may change while the session
++    // runs. A browser changes the bit rate every second or two: it renders the
++    // rate control buffer again and sends the next picture, with no new
++    // context and no key frame. The QP range may not: the kernel refuses
++    // that control once the stream is on.
++    const bool rates_changed = s.bitrate != e.settings.bitrate ||
++                               s.peak_bitrate != e.settings.peak_bitrate ||
++                               s.fps_num != e.settings.fps_num || s.fps_den != e.settings.fps_den;
+     const bool idr =
+         s.hevc ? p.hevc_params.pic_fields.bits.idr_pic_flag : p.params.pic_fields.bits.idr_pic_flag;
+     const bool intra =
+@@ -792,6 +821,10 @@ std::shared_ptr<EncodeTask> Encoder::encode(const EncodeSettings &s, const Encod
+     try {
+         // Scalar V4L2 controls have no per-request association. Drain before a
+         // QP change or forced IDR so they cannot affect an earlier queued frame.
++        if (rates_changed) {
++            e.finish();
++            e.set_rates(s);
++        }
+         if ((s.rate_control == VA_RC_CQP && qp != e.current_qp) || (intra && e.token))
+             e.finish();
+         if (e.jobs.size() == e.input_count + e.capture.size()) {
+diff --git a/tests/encoder/meson.build b/tests/encoder/meson.build
+index 58bfeec..ce50467 100644
+--- a/tests/encoder/meson.build
++++ b/tests/encoder/meson.build
+@@ -35,6 +35,14 @@ if have_gpu_copy
+   )
+ endif
+ 
++executable(
++  'rate-change',
++  'rate-change.cpp',
++  dependencies: [va, va_drm],
++  install: true,
++  install_dir: tests_install_dir / 'encoder',
++)
++
+ shared_module(
+   'reject-coherent',
+   'reject-coherent.c',
+diff --git a/tests/encoder/rate-change.cpp b/tests/encoder/rate-change.cpp
+new file mode 100644
+index 0000000..f3ed032
+--- /dev/null
++++ b/tests/encoder/rate-change.cpp
+@@ -0,0 +1,290 @@
++// SPDX-License-Identifier: MIT
++// Board test: c++ -std=c++17 tests/encoder/rate-change.cpp -lva -lva-drm -o rate-change
++// Usage: rate-change [--hevc] [--vbr]
++// One encoder session and one key frame: the bit rate changes twice while it
++// runs and the frame rate once, the way a browser does it - the rate control
++// buffer is rendered again with the next picture, with no new context and no
++// key frame. Prints what every phase came out at, and exits with 1 when a
++// phase is more than forty per cent off what was asked for.
++#include <va/va.h>
++#include <va/va_drm.h>
++#include <va/va_enc_h264.h>
++#include <va/va_enc_hevc.h>
++#include <fcntl.h>
++#include <unistd.h>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <random>
++
++namespace {
++bool hevc = false, vbr = false;
++constexpr unsigned width = 1280, height = 720, count = 4;
++
++void expect(VAStatus got, VAStatus wanted = VA_STATUS_SUCCESS) {
++    if (got != wanted) {
++        std::fprintf(stderr, "Expected %s, got %s\n", vaErrorStr(wanted), vaErrorStr(got));
++        std::exit(1);
++    }
++}
++void require(bool value, const char *message) {
++    if (!value) {
++        std::fprintf(stderr, "%s\n", message);
++        std::exit(1);
++    }
++}
++
++// A misc parameter: the header, then the value right after it. The header ends
++// in a flexible array member, so it cannot be a member of another struct.
++template <class T> struct Misc {
++    alignas(8) unsigned char bytes[sizeof(VAEncMiscParameterBuffer) + sizeof(T)];
++    explicit Misc(VAEncMiscParameterType type) {
++        std::memset(bytes, 0, sizeof(bytes));
++        header()->type = type;
++    }
++    VAEncMiscParameterBuffer *header() { return reinterpret_cast<VAEncMiscParameterBuffer *>(bytes); }
++    T *value() { return reinterpret_cast<T *>(bytes + sizeof(VAEncMiscParameterBuffer)); }
++    constexpr size_t size() const { return sizeof(bytes); }
++};
++
++struct Session {
++    VADisplay display;
++    VAConfigID config = VA_INVALID_ID;
++    VAContextID context = VA_INVALID_ID;
++    VASurfaceID inputs[count], recon[count];
++    VABufferID coded[count];
++    VAImageFormat format{};
++    VAImage image{};
++    std::mt19937 rng{1};
++
++    explicit Session(VADisplay d) : display(d) {
++        VAConfigAttrib attr{VAConfigAttribRateControl, vbr ? VA_RC_VBR : VA_RC_CBR};
++        expect(vaCreateConfig(d, hevc ? VAProfileHEVCMain : VAProfileH264High, VAEntrypointEncSlice,
++                              &attr, 1, &config));
++        expect(vaCreateSurfaces(d, VA_RT_FORMAT_YUV420, width, height, inputs, count, nullptr, 0));
++        expect(vaCreateSurfaces(d, VA_RT_FORMAT_YUV420, width, height, recon, count, nullptr, 0));
++        expect(vaCreateContext(d, config, width, height, VA_PROGRESSIVE, inputs, count, &context));
++        format.fourcc = VA_FOURCC_NV12;
++        format.byte_order = VA_LSB_FIRST;
++        format.bits_per_pixel = 12;
++        expect(vaCreateImage(d, &format, width, height, &image));
++        for (auto &id : coded)
++            expect(vaCreateBuffer(d, context, VAEncCodedBufferType, width * height * 3, 1, nullptr,
++                                  &id));
++    }
++    ~Session() {
++        if (context != VA_INVALID_ID)
++            vaDestroyContext(display, context);
++        for (auto id : coded)
++            if (id != VA_INVALID_ID)
++                vaDestroyBuffer(display, id);
++        if (image.image_id != VA_INVALID_ID)
++            vaDestroyImage(display, image.image_id);
++        vaDestroySurfaces(display, inputs, count);
++        vaDestroySurfaces(display, recon, count);
++        if (config != VA_INVALID_ID)
++            vaDestroyConfig(display, config);
++    }
++    // A picture that moves on from the one before: a ramp that drifts, a block
++    // that slides across, and light noise that is new on every frame. Heavier
++    // noise is not the test's point: it costs more than 1 Mbit/s a frame even
++    // at the largest QP, and the low phases would read as over the target
++    // whatever the rate control does.
++    void upload(VASurfaceID surface, unsigned frame) {
++        void *data;
++        expect(vaMapBuffer(display, image.buf, &data));
++        auto *bytes = static_cast<unsigned char *>(data);
++        std::memset(bytes, 128, image.data_size);
++        for (unsigned by = 0; by < height / 16; ++by) {
++            unsigned char noise[width / 16];
++            for (auto &n : noise)
++                n = static_cast<unsigned char>(rng());
++            for (unsigned y = by * 16; y < (by + 1) * 16; ++y) {
++                unsigned char *row = bytes + image.offsets[0] + y * image.pitches[0];
++                for (unsigned x = 0; x < width; ++x)
++                    row[x] = static_cast<unsigned char>(
++                        (x * 255 / width + y * 127 / height + frame * 3 + noise[x / 16] / 8) & 255);
++            }
++        }
++        const unsigned side = 160, sx = (frame * 11) % (width - side),
++                       sy = (frame * 7) % (height - side);
++        for (unsigned y = sy; y < sy + side; ++y)
++            std::memset(bytes + image.offsets[0] + y * image.pitches[0] + sx, 235, side);
++        expect(vaUnmapBuffer(display, image.buf));
++        expect(vaPutImage(display, surface, image.image_id, 0, 0, width, height, 0, 0, width, height));
++    }
++    // One picture. Returns the bytes it came out as, or 0 when the driver refused it.
++    size_t submit(unsigned frame, unsigned fps, unsigned bits, unsigned percent, VAStatus *got) {
++        const unsigned i = frame % count;
++        upload(inputs[i], frame);
++        VABufferID parameters[5];
++        unsigned n = 0;
++        bool idr = frame == 0;
++        VAEncSequenceParameterBufferH264 seq{};
++        VAEncPictureParameterBufferH264 pic{};
++        VAEncSliceParameterBufferH264 slice{};
++        VAEncSequenceParameterBufferHEVC hs{};
++        VAEncPictureParameterBufferHEVC hp{};
++        VAEncSliceParameterBufferHEVC sl{};
++        if (hevc) {
++            hs.general_profile_idc = 1;
++            hs.general_level_idc = 93;
++            hs.pic_width_in_luma_samples = width;
++            hs.pic_height_in_luma_samples = height;
++            hs.seq_fields.bits.chroma_format_idc = 1;
++            hs.log2_diff_max_min_luma_coding_block_size = 2;
++            hs.ip_period = 1;
++            hp.decoded_curr_pic.picture_id = recon[i];
++            hp.coded_buf = coded[i];
++            hp.pic_init_qp = 26;
++            hp.pic_fields.bits.idr_pic_flag = idr;
++            hp.pic_fields.bits.coding_type = idr ? 1 : 2;
++            hp.pic_fields.bits.reference_pic_flag = 1;
++            sl.num_ctu_in_slice = (width + 31) / 32 * ((height + 31) / 32);
++            sl.slice_type = idr ? 2 : 1;
++            sl.ref_pic_list0[0].picture_id = recon[(i + count - 1) % count];
++            sl.slice_fields.bits.last_slice_of_pic_flag = 1;
++            sl.slice_fields.bits.slice_loop_filter_across_slices_enabled_flag = 1;
++            expect(vaCreateBuffer(display, context, VAEncSequenceParameterBufferType, sizeof(hs), 1,
++                                  &hs, &parameters[n++]));
++            expect(vaCreateBuffer(display, context, VAEncPictureParameterBufferType, sizeof(hp), 1,
++                                  &hp, &parameters[n++]));
++            expect(vaCreateBuffer(display, context, VAEncSliceParameterBufferType, sizeof(sl), 1, &sl,
++                                  &parameters[n++]));
++        } else {
++            seq.level_idc = 31;
++            seq.picture_width_in_mbs = width / 16;
++            seq.picture_height_in_mbs = height / 16;
++            seq.seq_fields.bits.frame_mbs_only_flag = 1;
++            seq.seq_fields.bits.chroma_format_idc = 1;
++            seq.ip_period = 1;
++            seq.intra_period = 0;
++            seq.intra_idr_period = 2048;
++            seq.max_num_ref_frames = 1;
++            seq.bits_per_second = bits;
++            seq.vui_parameters_present_flag = 1;
++            seq.vui_fields.bits.timing_info_present_flag = 1;
++            seq.num_units_in_tick = 1;
++            seq.time_scale = fps * 2;
++            pic.CurrPic.picture_id = recon[i];
++            pic.coded_buf = coded[i];
++            pic.pic_init_qp = 26;
++            pic.pic_fields.bits.idr_pic_flag = idr;
++            pic.pic_fields.bits.reference_pic_flag = 1;
++            pic.pic_fields.bits.entropy_coding_mode_flag = 1;
++            pic.num_ref_idx_l0_active_minus1 = 0;
++            slice.num_macroblocks = width / 16 * (height / 16);
++            slice.slice_type = idr ? 2 : 0;
++            slice.macroblock_info = VA_INVALID_ID;
++            slice.RefPicList0[0].picture_id = recon[(i + count - 1) % count];
++            expect(vaCreateBuffer(display, context, VAEncSequenceParameterBufferType, sizeof(seq), 1,
++                                  &seq, &parameters[n++]));
++            expect(vaCreateBuffer(display, context, VAEncPictureParameterBufferType, sizeof(pic), 1,
++                                  &pic, &parameters[n++]));
++            expect(vaCreateBuffer(display, context, VAEncSliceParameterBufferType, sizeof(slice), 1,
++                                  &slice, &parameters[n++]));
++        }
++        // What a browser sends with every picture when it has no QP of its own:
++        // the rate control and the frame rate.
++        Misc<VAEncMiscParameterRateControl> rate{VAEncMiscParameterTypeRateControl};
++        rate.value()->bits_per_second = bits;
++        rate.value()->target_percentage = percent;
++        rate.value()->window_size = 1000;
++        rate.value()->min_qp = 1;
++        rate.value()->max_qp = 51;
++        expect(vaCreateBuffer(display, context, VAEncMiscParameterBufferType, rate.size(), 1, rate.bytes,
++                              &parameters[n++]));
++        Misc<VAEncMiscParameterFrameRate> framerate{VAEncMiscParameterTypeFrameRate};
++        // Chromium writes the plain frame rate here, and the driver reads the low
++        // sixteen bits as the time scale and the high ones as the tick count (0 for 1).
++        framerate.value()->framerate = fps;
++        expect(vaCreateBuffer(display, context, VAEncMiscParameterBufferType, framerate.size(), 1,
++                              framerate.bytes, &parameters[n++]));
++        expect(vaBeginPicture(display, context, inputs[i]));
++        expect(vaRenderPicture(display, context, parameters, n));
++        *got = vaEndPicture(display, context);
++        for (unsigned k = 0; k < n; ++k)
++            expect(vaDestroyBuffer(display, parameters[k]));
++        if (*got != VA_STATUS_SUCCESS)
++            return 0;
++        expect(vaSyncBuffer(display, coded[i], VA_TIMEOUT_INFINITE));
++        void *data;
++        expect(vaMapBuffer(display, coded[i], &data));
++        auto *segment = static_cast<VACodedBufferSegment *>(data);
++        require(segment->size && segment->buf && !segment->next && !segment->status,
++                "invalid coded segment");
++        const size_t size = segment->size;
++        expect(vaUnmapBuffer(display, coded[i]));
++        expect(vaSyncSurface(display, inputs[i]));
++        return size;
++    }
++};
++
++struct Phase {
++    const char *name;
++    unsigned frames, fps, bits, percent;
++};
++} // namespace
++
++int main(int argc, char **argv) {
++    for (int i = 1; i < argc; ++i) {
++        if (!std::strcmp(argv[i], "--hevc"))
++            hevc = true;
++        else if (!std::strcmp(argv[i], "--vbr"))
++            vbr = true;
++        else
++            return 2;
++    }
++    int fd = open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC);
++    require(fd >= 0, "open the render node");
++    VADisplay display = vaGetDisplayDRM(fd);
++    int major, minor;
++    expect(vaInitialize(display, &major, &minor));
++
++    // In VBR the driver takes bits_per_second for the peak and the percentage
++    // of it for the target, so every target here is half of what is passed.
++    const Phase phases[] = {
++        {"1 Mbit/s, 30 fps", 150, 30, 1000000, 100},
++        {"3 Mbit/s, 30 fps", 150, 30, 3000000, 100},
++        {"1 Mbit/s again", 150, 30, 1000000, 100},
++        {"2 Mbit/s, 15 fps", 75, 15, 2000000, 100},
++    };
++    int failed = 0;
++    {
++        Session session(display);
++        unsigned frame = 0;
++        std::printf("%s, %s: %ux%u, one session, one key frame\n", hevc ? "HEVC Main" : "H.264 High",
++                    vbr ? "VBR" : "CBR", width, height);
++        for (const Phase &phase : phases) {
++            unsigned bits = phase.bits * (vbr ? 2 : 1), percent = vbr ? 50 : 100;
++            size_t total = 0, largest = 0, first = 0;
++            VAStatus got = VA_STATUS_SUCCESS;
++            unsigned frames = 0;
++            for (; frames < phase.frames; ++frames) {
++                const size_t size = session.submit(frame++, phase.fps, bits, percent, &got);
++                if (got != VA_STATUS_SUCCESS)
++                    break;
++                if (!frames)
++                    first = size;
++                total += size;
++                if (size > largest)
++                    largest = size;
++            }
++            // The average over the phase, at the phase's frame rate
++            const unsigned long long kbps = frames ? total * 8 / 1000 / frames * phase.fps : 0;
++            std::printf("  %-20s %3u frames, %8zu bytes, %5llu kbit/s (asked %u), %6zu bytes a frame, %zu to %zu a frame\n",
++                        phase.name, frames, total, kbps, phase.bits / 1000, frames ? total / frames : 0,
++                        first, largest);
++            if (got != VA_STATUS_SUCCESS) {
++                std::printf("                     refused: %s\n", vaErrorStr(got));
++                failed = 1;
++                break;
++            }
++            if (kbps * 10 < phase.bits / 1000 * 6 || kbps * 10 > phase.bits / 1000 * 14)
++                failed = 1;
++        }
++    }
++    expect(vaTerminate(display));
++    close(fd);
++    return failed;
++}
+-- 
+2.54.0
+

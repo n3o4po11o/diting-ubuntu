@@ -1,0 +1,38 @@
+Source: qcom-va-driver
+Section: libs
+Priority: optional
+Maintainer: ubuntu-diting local build <ubuntu-diting@localhost>
+Build-Depends: debhelper-compat (= 13),
+               meson (>= 0.61),
+               ninja-build,
+               pkgconf,
+               quilt,
+               libva-dev (>= 1.10),
+               libdrm-dev
+Standards-Version: 4.7.0
+Homepage: https://github.com/radxa-pkg/qcom-va-driver
+Rules-Requires-Root: no
+
+Package: qcom-va-driver
+Architecture: arm64
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: VA-API driver with an encoder for the Qualcomm iris video core (Diting)
+ VA-API backend on Qualcomm Iris through the V4L2 stateful encoder and
+ decoders, for the Xiaomi 12T Pro (diting): H.264 (Constrained Baseline,
+ Main, High) and HEVC Main encoding in hardware, CQP, CBR or VBR, for
+ VA-API applications.
+ .
+ Installed as qcom_drv_video.so and nothing else. A program selects it with
+ LIBVA_DRIVER_NAME=qcom; without that, it gets libva-v4l2-stateful, which
+ keeps the msm and v4l2 driver names and decodes for the browsers.
+
+Package: qcom-va-driver-tests
+Section: misc
+Priority: optional
+Architecture: arm64
+Depends: qcom-va-driver (= ${binary:Version}), ${shlibs:Depends}, ${misc:Depends}
+Description: Hardware tests of qcom-va-driver
+ The tests of upstream qcom-va-driver, to run on the phone against its own
+ video core: the encoder ones (api-smoke, async, ffmpeg-smoke.py) and the
+ decoder ones. In /usr/libexec/qcom-va-driver/tests; they take the driver
+ from LIBVA_DRIVER_NAME=qcom.

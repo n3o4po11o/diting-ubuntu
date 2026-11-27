@@ -177,7 +177,8 @@ in `docs/BRINGUP_STATUS.md`.
 The iris encoder is registered again (driver-fix with patches 0119–0129, on
 the phone since 2026-11-26 18:18): `/dev/video1`, "Iris Encoder", a V4L2
 stateful encoder - `h264_v4l2m2m` and `hevc_v4l2m2m` in ffmpeg. GStreamer
-has no element for it, and there is no VA-API encoder. What the encoder did
+has no element for it; the VA-API encoder is `qcom-va-driver` (below, and
+not switched on for the browsers). What the encoder did
 in r35, and what ended it, is under "Fixed" below. Read on the phone: H.264
 and HEVC at 720p30, 1080p30, 1080p60 and 4K30, every frame sent is in the
 stream (decoded in software and compared with the source: PSNR 39-46 dB);
@@ -212,15 +213,77 @@ kernel log had nothing new through all of it. Limits:
   drain while packets still hold the capture buffers; the kit's patch 0003
   (in `packages/ffmpeg-diting`) is for that - 0 of 80 there.
 - No forced keyframes: the driver offers no control for it (upstream 7.3
-  has one).
+  has one). A backport of the gen2 half of that upstream patch is written and
+  built: on 2026-11-27 only `qcom-iris.ko` differed from the package on the
+  phone (`scripts/module-diff.py`). It is not in this tree until it has run
+  on the phone, and it is not on the phone: the module is not unloaded and
+  reloaded here, so trying it takes a reboot. Until then the second key
+  frame of a VA-API session fails (below).
 - The HEVC level is not constrained by the driver (H.264's is, by 0128).
 
-Hardware encoding **in the browsers** is a separate road: Chromium on Linux
-encodes through VA-API and needs `VAEntrypointEncSlice` from the driver, which
-`libva-v4l2-stateful` does not have (it decodes only). What it takes - the
-`qcom-va-driver` reference implementation, its gaps against Chromium, the
-kernel and driver changes - is evaluated in `docs/VIDEO_ENCODE.md`; none of it
-is implemented.
+Hardware encoding **through VA-API**: the `qcom-va-driver` package (2026-11-27).
+Radxa's reference implementation (MIT) at `ee8622c` with two patches of ours
+(`packages/qcom-va-driver/patches`), built by `make qcom-va-driver`
+(`docs/VIDEO_ENCODE.md`, which was the evaluation and is now the record).
+Installed on the phone by hand as `1.1.1+gitee8622c-0diting3`; not in an
+image. It is `qcom_drv_video.so` and nothing else, so it stands next to
+`libva-v4l2-stateful`, which keeps the `msm` and `v4l2` names: a program picks
+it with `LIBVA_DRIVER_NAME=qcom`, and the browsers do not use it yet. Read on
+the phone (the tables are in `docs/VIDEO_ENCODE.md`, section 12):
+
+- `vainfo` lists `VAEntrypointEncSlice` for H.264 (Constrained Baseline,
+  Main, High) and HEVC Main. 74 streams, one session each - one GOP, CQP, CBR
+  and VBR, 130x130 to 4K, H.264 and HEVC - came out complete, and the kernel
+  log had nothing through all of it.
+- **Upstream's rate control does not work on this firmware.** The driver
+  pairs a coded buffer with its frame by the V4L2 timestamp, and made that
+  the frame number in microseconds. The firmware budgets its bits by the
+  stamps it is given and read those as a million frames a second: CBR came
+  out at 734 kbit/s whether 1, 4 or 20 Mbit/s were asked for, and 681 with
+  the largest QP capped at 42, so it sat at the top of the QP range; VBR at
+  4 Mbit/s gave 911. Turning off every other control the
+  driver sets changes nothing. Patch 0001 stamps the frames a frame apart
+  instead: CBR at 4 Mbit/s then gives 3977, VBR at 4 Mbit/s 4143, and 20 Mbit/s
+  13784, which is where the content runs out of detail (20 asked for, at
+  QP 24 the same source takes 5).
+- Patch 0002 takes a new bit rate and frame rate while the session runs,
+  which upstream refused ("changing encoder settings requires a new
+  context"): the pipeline is drained, then the controls are set.
+  `qcom-va-driver-tests` has `rate-change` for it.
+- The upstream tests (`api-smoke`, `async`) fail at the second key frame
+  until 0137 is on the phone: `encoder S_CTRL: Invalid argument`. With one
+  key frame a session encodes as long as it is asked to.
+- Decoding through it, read with ffmpeg against a software decode: H.264,
+  HEVC and VP9 at 8 bit frame for frame identical, 720p to 4K, with B frames,
+  on a seek, three seeks in one process, and two decoders next to an encoder.
+  **10-bit (HEVC Main10, VP9 profile 2) comes out as P010, identical to
+  software**, which `libva-v4l2-stateful` cannot (next section). A stream cut
+  mid-frame: the frames before the cut are identical, the damaged one
+  differs from software's version of it (the old driver drops it).
+- **Snap Chromium loads it** (libva 2.23 of the mesa-2604 content snap,
+  libstdc++ 6.0.35), and with
+  `--enable-features=AcceleratedVideoEncoder` WebCodecs picks the hardware
+  encoder by default (`hardwareAcceleration: "no-preference"`): the GPU
+  process logs "Initializing VAVEA" and goes to `kEncoding`. But not one
+  frame has been encoded in hardware by it yet. Frames that come from
+  memory - a canvas, an I420 buffer - have to be put into a GPU buffer first,
+  and Chromium cannot create that here: `VideoEncodeAcceleratorAdapter`
+  logs "Unable to create a mappable shared image" (a `VEA_READ_CAMERA_AND_CPU_READ_WRITE`
+  buffer) and falls back to OpenH264, which is what the page's numbers then
+  are. Frames that are GPU buffers already - a video the decoder produced -
+  are passed through untouched; that path is not tried yet (it needs the
+  desktop session). Headless Chromium does not touch VA-API at all.
+- Initializing the driver opens and closes every `/dev/video*` node, five
+  times in all (`/dev/video-dec0` is matched by the glob as well as
+  `/dev/video4`). Twice that day, each time just after `vainfo` had run
+  (once right after the package was installed, once at the start of a test
+  run), the video core did not go back to idle at once: the kernel log said
+  "skip power collapse ... failed to suspend" every second and a half, 14
+  times in 42 s the first time and three the second. Other runs of the same
+  kind, and 56 processes in a row that only initialized the driver, were
+  followed by a clean suspend, and so was every real encode session. The
+  core suspended by itself each time. Not characterized further; a browser
+  initializes once.
 
 ### Browser video decoding (VA-API over V4L2)
 
@@ -251,7 +314,8 @@ the `libva-v4l2-stateful` package (patched VA-API driver, also installed as
   firmware returns empty buffers for hidden VP9 frames out of order).
   Decoding is serialised per frame; 4K VP9 plays smoothly.
 - **10-bit** (HEVC Main10, VP9 profile 2) is advertised but only NV12
-  output is implemented: untested and expected to fail.
+  output is implemented: untested and expected to fail. `qcom-va-driver`
+  does decode both, to P010 ("Video encoding", above).
 - No AV1: the decoder lists only H.264, HEVC and VP9 (`VIDIOC_ENUM_FMT`).
 - Kernel r38 or later is required: earlier iris read past its timestamp
   metadata (0084) and could end decoding with a spurious EOS.

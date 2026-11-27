@@ -5,7 +5,7 @@ S := scripts
 SUDO ?= sudo -E
 
 .PHONY: help modemmanager phosh check-host sources reference references check-latest-kernel update-kernel kernel dtbs phoc sensors libcamera \
-	dtbs-check packages vaapi ffmpeg firmware-setup mobile-config-firefox cellular-settings firmware rootfs release owner-release initramfs boot image verify \
+	dtbs-check packages vaapi qcom-va-driver ffmpeg firmware-setup mobile-config-firefox cellular-settings firmware rootfs release owner-release initramfs boot image verify \
 	repro-check qemu-test inspect-device lint clean distclean
 
 help:
@@ -46,6 +46,9 @@ packages:
 ## vaapi                libva-v4l2-stateful (VA-API driver for the iris decoder; arm64 buildd chroot)
 vaapi:
 	$(S)/build-libva-v4l2-stateful.sh
+## qcom-va-driver     qcom-va-driver, the VA-API encoder over the iris encoder, and its tests; next to vaapi, picked with LIBVA_DRIVER_NAME=qcom (arm64 buildd chroot)
+qcom-va-driver:
+	$(S)/build-qcom-va-driver.sh
 ## ffmpeg              ffmpeg + ffprobe with the V4L2 patches, for /usr/local/bin of the rootfs (ci/FFMPEG.md)
 ffmpeg:
 	$(S)/fetch-sources.sh --ffmpeg

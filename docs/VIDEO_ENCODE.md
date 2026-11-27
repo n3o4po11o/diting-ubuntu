@@ -1,16 +1,18 @@
 # 视频硬件编码进浏览器：在 V4L2 编码器上做 VA-API（Chromium）
 
-状态：**评估文档，尚未实施**。“现状”是 2026-11-27 在手机上（内核 `7.2.10-diting`，固件
+状态：**第 1–11 节是 2026-11-27 的评估，原样保留；实施记录在第 12 节**，读的时候以它为准
+（它更正了评估里的几处）。“现状”是那天在手机上（内核 `7.2.10-diting`，固件
 `vpu20_4v.mbn`，Chromium snap `158.0.8127.36`）、在源码里（Chromium 分支 `8127`、
 `radxa-pkg/qcom-va-driver@ee8622c`、我们的内核树）读出来的；没有读过、没有试过的地方标了
-“待核实”。动工前先读第 10 节。
+“待核实”。
 
 目录：[0 结论](#0-结论) · [1 现状](#1-现状已核实) ·
 [2 Chromium 的用法](#2-chromium-在-linux-上怎么用-va-api-编码) ·
 [3 参考实现](#3-参考实现qcom-va-driver) · [4 逐项对照](#4-逐项对照) ·
 [5 方案](#5-方案比较与推荐) · [6 要做的改动](#6-要做的改动) ·
 [7 估时](#7-工作分解与估时) · [8 测试计划](#8-测试计划) ·
-[9 风险与限制](#9-风险与限制) · [10 待核实](#10-待核实) · [11 出处](#11-出处)
+[9 风险与限制](#9-风险与限制) · [10 待核实](#10-待核实) · [11 出处](#11-出处) ·
+[**12 实施记录**](#12-实施记录2026-11-27)
 
 ## 0 结论
 
@@ -425,3 +427,172 @@ QP 的写法：
 - 原始材料（工作区 `liuqin-study/raw/vaenc-eval/`，不在仓库内）：`phone-encoder-2026-11-27.txt`
   （手机上的码流解析、控件、速度）、`chromium-8127/`（下载的 Chromium 源文件）、
   `qcom-va-driver/`（`ee8622c` 的副本）、`libva/`（libva 头文件）。
+
+## 12 实施记录（2026-11-27）
+
+这一天做完了 S0（不动内核的验证），并且做了两件评估里没有的事：上游驱动带着两个缺陷，
+在这颗固件上一个是码控完全失效、一个是视频通话用不了，都已经在 `packages/qcom-va-driver/patches`
+里修掉并在手机上验证。S1 的内核补丁编出来了，还没上机。**Chromium 里还没有编出过一帧硬件帧**：
+卡在帧的递交上（12.2 第 5 条），不是驱动的问题。
+
+### 12.1 仓库里有什么
+
+| 位置 | 内容 |
+| --- | --- |
+| `ubuntu-diting/packages/qcom-va-driver/` | `debian/`（我们自己写的，不用上游的：关掉 GPU 拷贝、CDSP、Vulkan，不带 `v4l2` 名字）和 `patches/`（0001、0002，见 12.3） |
+| `ubuntu-diting/packages/qcom-va-driver/patches/0002` | 还带一个测试程序 `tests/encoder/rate-change`：一个会话、一个关键帧，码率改两次、帧率改一次 |
+| `scripts/build-qcom-va-driver.sh`、`make qcom-va-driver` | 照 `libva-v4l2-stateful` 的做法：`git archive` 上游、放上补丁、在 arm64 chroot 里 `dpkg-buildpackage` |
+| `config/diting.conf` | `QCOM_VA_DRIVER_URL`、`QCOM_VA_DRIVER_COMMIT`（`ee8622c`）；`fetch-sources.sh` 认识这个名字，`ci/tests.sh` 的计数跟着改成 17 |
+| 两个 deb | `qcom-va-driver`（只有 `/usr/lib/aarch64-linux-gnu/dri/qcom_drv_video.so`）、`qcom-va-driver-tests`（上游的硬件测试加 `rate-change`，在 `/usr/libexec/qcom-va-driver/tests/`） |
+
+**它不在镜像里**：`make rootfs` 不依赖它，`build-rootfs.sh` 不装它。方案（5.1 的 A 还是 B）定下来
+之前不进镜像。手机上是用 `dpkg -i` 装的 `1.1.1+gitee8622c-0diting3`，和 `libva-v4l2-stateful`
+并装；程序用 `LIBVA_DRIVER_NAME=qcom` 才选它，浏览器照旧用旧驱动。
+
+**怎么建**。构建服务器是 x86_64 的 Debian 13，主机上只有 git、docker、rsync、tmux。chroot 在
+`ci/Dockerfile.ffmpeg` 那个容器里建（`ci/ffmpeg.sh`：它是仓库里现成的“特权 chroot 构建容器”，
+名字叫 ffmpeg 只是因为先给 ffmpeg 建的）：
+
+```sh
+export DOCKER="sudo docker"
+ubuntu-diting/ci/ffmpeg.sh build && ubuntu-diting/ci/ffmpeg.sh up
+# 一次就够，主机重启后要重来：在容器里登记 qemu-aarch64 的 binfmt
+sudo docker exec -u 0 diting-ffmpeg sh -ec '
+	mountpoint -q /proc/sys/fs/binfmt_misc || mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc
+	sed "s|:/usr/libexec/qemu-binfmt/aarch64-binfmt-P:.*|:/usr/bin/qemu-aarch64-static:F|" \
+		/usr/lib/binfmt.d/qemu-aarch64.conf > /proc/sys/fs/binfmt_misc/register'
+ubuntu-diting/ci/ffmpeg.sh make qcom-va-driver     # 容器内 tmux，日志 output/logs/
+```
+
+trixie 的 `qemu-user-static` 走 systemd 的 `binfmt.d`，登记的解释器是一个再去按路径找 qemu 的
+包装程序（标志 `OPF`），进了 chroot 就找不到 qemu。`update-binfmts` 的数据库里也没有它。
+所以要自己登记静态的 qemu 本身，带 `F` 标志（`docs/BUILD.md` 里 openSUSE 那一段的做法）。
+debootstrap 在 qemu 下约 6 分钟，一次编译约 6 分钟。
+
+### 12.2 在手机上验证了什么
+
+1. **加载和会话**。`LIBVA_DRIVER_NAME=qcom vainfo` 列出 H.264（Constrained Baseline、Main、High）
+   和 HEVC Main 的 `VAEntrypointEncSlice`。编码器是 `/dev/video7`，720p 时 `stride=1280
+   storage-height=736`，驱动自己分配的 surface 直接以 DMA-BUF 送进去（`input path=direct`）。
+2. **单 GOP 矩阵**（定稿的包 `0diting3`）：h264/hevc × 三种 profile × CQP/CBR/VBR × 六种尺寸
+   （1280×720、1920×1080、960×540、854×480、640×480、130×130），加 4K。74 条流每条帧数完整、
+   恰好一个关键帧、只有 I 和 P，每一帧都是 `input path=direct`（零拷贝）。CBR 要 4 Mbit/s 的在
+   3911–3992 之间，VBR 要 2 Mbit/s 的在 1.6–2.6 Mbit/s 之间（130×130 画面太小，用不到这么多）；
+   PSNR 38–58 dB。内核日志 0 行，核心随即挂起。
+3. **码控**（H.264 High，720p，150 帧，`testsrc2`；上游原样就是 0001 之前）：
+
+   | 模式 | 要的 | 上游原样 | 带 0001 |
+   | --- | --- | --- | --- |
+   | CBR | 1 Mbit/s | 734 | 998 |
+   | CBR | 4 Mbit/s | 734 | 3977 |
+   | CBR | 20 Mbit/s | 734 | 13784 |
+   | VBR | 4 Mbit/s | 911 | 4143 |
+   | VBR | 16 Mbit/s | 2077 | 5269 |
+   | HEVC Main，CBR | 4 Mbit/s | 230 | 3965 |
+
+   20 Mbit/s 得 13.8 是内容的上限：同一内容恒定 QP 24 只要 5 Mbit/s。
+4. **流中改码率和帧率**（`rate-change`，720p，四段一个会话、只有一个关键帧）。0002 之前第一段
+   编完就被拒：`changing encoder settings requires a new context`。之后：
+
+   | 阶段 | 要的 | H.264 High，CBR | H.264 High，VBR | HEVC Main，VBR |
+   | --- | --- | --- | --- | --- |
+   | 30 fps | 1 Mbit/s | 990 | 1500 | 1440 |
+   | 30 fps | 3 Mbit/s | 2970 | 2670 | 2910 |
+   | 30 fps | 1 Mbit/s | 960 | 1290 | 1350 |
+   | 15 fps | 2 Mbit/s | 1890 | 1350 | 1470 |
+
+   （kbit/s，一段 150 帧，最后一段 75 帧；VBR 传的峰值是目标的两倍。）CBR 四段都在目标的 5%
+   以内。15 fps 那段每帧字节数翻倍而每秒码率对上目标：帧率变了之后码控跟着时间戳走。
+   内核日志 0 行。
+5. **解码回归**（同一批片子，软件解码的逐帧 md5 当基准，和现有驱动并排比）：
+
+   | 片子 | 输出 | `libva-v4l2-stateful` | `qcom-va-driver` |
+   | --- | --- | --- | --- |
+   | H.264 1080p、4K，HEVC 1080p，VP9 1080p，6 参考帧 4 B 帧的 720p | NV12 | 一致 | **一致** |
+   | HEVC Main10 4K、VP9 profile 2 | P010 | 失败 | **一致** |
+   | 同一个进程里 seek 三次 | NV12 | — | 一致 |
+   | 两个解码器加一个编码器同时跑 | NV12 | — | 都一致，编码 CBR 4 M 得 3992 |
+
+   内核日志 0 行。ffmpeg 这一层的回归支持方案 A；**浏览器播放的回归没做**（需要桌面会话）。
+6. **Chromium**（snap 158，不经启动器，`snap run --shell` 里自己给驱动名和 feature）：
+   - snap 里能加载（libva 2.23、libdrm、libstdc++ 6.0.35 都在 snap 自己的 content 里）。
+     10.8 有了答案。
+   - 开 `AcceleratedVideoEncoder` 之后，WebCodecs 用默认的 `hardwareAcceleration: "no-preference"`
+     就选硬件编码器：GPU 进程日志 `Initializing VAVEA, input_format: PIXEL_FORMAT_NV12, ...
+     storage_type: GpuMemoryBuffer`，`UpdateRates`，然后 `setting state to: kEncoding`：
+     **编码器初始化成功**。10.5 有了答案（WebRTC 没测）。
+   - 然后渲染进程里 `VideoEncodeAcceleratorAdapter` 报 5 次 `Unable to create a mappable shared
+     image`，一帧都没送到编码器，回退到 OpenH264。Chromium 158 在 Linux 上固定按 GPU 缓冲送帧
+     （`StorageType::kGpuMemoryBuffer`）：来源帧已经是 GPU 共享图像就直通；来自内存的帧（2D
+     画布、I420 字节）要先装进一个 CPU 可写的 GPU 缓冲（`VEA_READ_CAMERA_AND_CPU_READ_WRITE`），
+     这一步在这台手机的 snap 里建不出来。原因没查。无头模式的 Chromium 根本不碰 VA-API。
+   - 顺带：测试用的那段视频是 Chromium 经 qcom 驱动**硬解**出来的（240 帧），播放对不对没看。
+
+另外记一条：驱动初始化时把 `/dev/video*` 全开一遍再关，共 5 次。那天有两次，都是紧跟在一次
+`vainfo` 之后（一次在装完包后，一次在一轮测试的开头），核心没有立刻回到空闲：内核日志每 1.5 秒
+一条 `failed to suspend`，第一次 42 秒里 14 条，第二次 3 条；别处同样的操作、连着 56 个只初始化的
+进程、每一次真正的编码会话之后，都是干净地挂起。每次都自己恢复，没有再深究
+（KNOWN_ISSUES）。
+
+### 12.3 上游驱动的两个缺陷
+
+**0001：时间戳让码控失效。** `Encoder::encode()` 把 V4L2 时间戳当回配令牌：第 n 帧的戳是 n 微秒。
+固件的码控按输入时间戳算每帧的预算，把它当成每秒一百万帧，于是顶到允许的最大 QP。二分是在
+实验版驱动里用环境变量开关做的：关掉头模式、峰值码率、QP 范围、帧率、GOP 中的任何一个，CBR
+都是 734；只把时间戳改成按帧间隔排，CBR 4 M 就得 3977。V4L2 直编（ffmpeg，给驱动的是帧自己的
+时间戳）同一天测要 4 Mbit/s 得 4127，与此相符。修法：戳从上一个戳往后加一帧的间隔（按会话的
+帧率），仍然唯一、仍然被固件原样带回来。
+
+**0002：流中改码率被拒。** 6.2 写的事。排空之后下发 `BITRATE`、`BITRATE_PEAK` 和 `S_PARM`。
+内核收 `S_PARM` 时不报错（更新 `frame_rate`、查上限、重算 level），但不会再给固件发帧率属性：
+流里的时序信息还是会话开始时的那个，码率预算跟着时间戳走。QP 上下限、level、熵编码、去块滤波
+仍然要新上下文（内核在流中拒绝 QP 上下限的控件）。
+
+这两个补丁值得报给上游（`radxa-pkg/qcom-va-driver`），还没报。
+
+### 12.4 对评估的更正
+
+- 3.2 “输出：MMAP 的 CAPTURE 缓冲，用时间戳令牌对应到每一帧”：这个令牌就是码控失效的原因。
+- 3.3 的表和 6.1：能力表只有一张 `inst_fw_cap_sm8550_enc`，gen2 平台共用，SM8450 也用它。回移
+  补丁（编为 0137）43 行，和 0127–0129、0134 没有冲突。已编出：`module-diff.py` 比对新旧两个包，
+  1699 个模块里只有 `qcom-iris.ko` 不同，vmlinuz、config、System.map 一样，所以上机只要把模块
+  放进 `updates/` 再重启，不用刷 boot。**还没上机，所以按仓库的规矩它还不在 git 里**（在写它的
+  那台机器的工作区里）；上机验证过了才作为 0137 提交。
+- 4 的第 13 行（输入帧 I420/NV12，“性能待测”）：在这台手机上，来自内存的帧在 Chromium 里过不去
+  （12.2 第 6 条）。GPU 来源帧那条路没试。
+- 5.1 方案 A 的“不用移植代码；能跟上游”：上游在这颗固件上带着两个缺陷，“跟上游”意味着每次
+  重新带上 0001、0002，或者把它们推上去。
+- 6.3：chroot 现在在构建服务器上（12.1）；snap 里能加载；`diting-chromium-vaapi` 和
+  `~/.chromium-browser.init` 没动。
+- 9.3 的码率数字是修好之后的：CBR 贴着目标，VBR 要 4 得 4.1；真实会议画面没测。
+
+### 12.5 第 10 节的答复
+
+| # | 问题 | 答复 |
+| --- | --- | --- |
+| 1 | 能不能编译、加载、开会话 | 能（12.2 第 1、2 条） |
+| 2 | 补丁加到哪张表、有没有冲突 | `inst_fw_cap_sm8550_enc`；无冲突；已编出，未上机 |
+| 3 | 流中改码率固件是否调整 | 调整：`rate-change` 的 3 Mbit/s 那段实得 2970 |
+| 4 | 流中 `S_PARM` 是否允许、是否生效 | 内核允许，但不发给固件；预算跟着时间戳走，生效（15 fps 那段要 2 Mbit/s 得 1890） |
+| 5 | Chromium 给 WebCodecs 选不选硬件 | 选（默认就是）；WebRTC 没测 |
+| 6 | 第一帧延迟、关键帧延迟 | 没测（Chromium 里还没有硬件帧） |
+| 7 | 编码器输入缓冲的步长和存储高度 | 720p：1280、736；Chromium 按 GPU 缓冲送帧，CPU 帧要先转进 GPU 缓冲 |
+| 8 | 拷进 snap 能不能加载 | 能 |
+| 9 | 0002 需不需要 | 没碰到；ffmpeg 一层没要过 32 个以上，浏览器没测 |
+| 10 | 对端能不能解这路流 | 没测 |
+| 11 | 720p30 时 CPU 和 GPU 的占用 | 没测 |
+
+### 12.6 还没做的
+
+1. **S1 上机**：0137 的 `qcom-iris.ko` 放进 `/lib/modules/$(uname -r)/updates/`、`depmod -a`、重启；
+   然后 `v4l2-ctl --list-ctrls` 里出现 `force_key_frame`，上游的 `ffmpeg-smoke.py`、`api-smoke`、
+   `async` 原样重跑（现在它们都在第二个关键帧上失败），流中请求 IDR 之后下一帧确实是 IDR。
+   这颗模块不卸载重载，所以必须重启。
+2. **Chromium**：需要桌面会话。GPU 来源帧（硬解出的视频 → `VideoFrame` → 编码器直通）先试；
+   CPU 来源帧要先查清 `mappable shared image` 为什么建不出来（带 `--vmodule=shared_image_factory=3,...`
+   的日志）。测试页和脚本在工作区 `liuqin-study/scripts/qva-webcodecs-test.html`、
+   `phone-qva-webcodecs.sh`，不在仓库里。
+3. **方案 A 还是 B**：ffmpeg 一层的解码回归通过；还差浏览器播放的回归。通过就整体换驱动
+   （`msm`、`v4l2` 两个名字挪过去，10-bit 解码顺带得到）。
+4. 真实会议画面的码控、首帧和关键帧延迟、对端解码器、CPU 和 GPU 占用。
+5. 两个补丁报给上游。

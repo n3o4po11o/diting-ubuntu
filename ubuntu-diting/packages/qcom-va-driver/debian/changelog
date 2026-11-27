@@ -1,0 +1,33 @@
+qcom-va-driver (1.1.1+gitee8622c-0diting3) resolute; urgency=medium
+
+  * patches/0002: a new bit rate and frame rate is taken while the session
+    runs (drain, then the controls), where upstream refused it. A browser
+    changes the bit rate every second or two without a new context.
+    tests/encoder/rate-change goes with it: one session, the rate changes
+    twice and the frame rate once.
+
+ -- ubuntu-diting local build <ubuntu-diting@localhost>  Fri, 27 Nov 2026 05:40:00 +0000
+
+qcom-va-driver (1.1.1+gitee8622c-0diting2) resolute; urgency=medium
+
+  * patches/0001: the encoder stamps its input a frame apart instead of a
+    microsecond. The firmware's rate control budgets by those stamps: with
+    the microsecond stamps of upstream, CBR came out at 734 kbit/s whether
+    1, 4 or 20 Mbit/s were asked for (docs/VIDEO_ENCODE.md).
+
+ -- ubuntu-diting local build <ubuntu-diting@localhost>  Fri, 27 Nov 2026 05:05:00 +0000
+
+qcom-va-driver (1.1.1+gitee8622c-0diting1) resolute; urgency=medium
+
+  * Local build for the Xiaomi 12T Pro (diting) from upstream ee8622c: the
+    VA-API driver with an encoder over the iris encoder (docs/VIDEO_ENCODE.md).
+    GPU copy, CDSP and Vulkan video processing are off; the CPU copy is built
+    in.
+  * Installed as qcom_drv_video.so only. Not as msm_drv_video.so nor
+    v4l2_drv_video.so: those two names stay with libva-v4l2-stateful, which
+    keeps decoding for the browsers, so the two packages stand side by side
+    and a program picks this one with LIBVA_DRIVER_NAME=qcom.
+  * Second package, qcom-va-driver-tests: upstream's hardware tests, built
+    for the phone.
+
+ -- ubuntu-diting local build <ubuntu-diting@localhost>  Fri, 27 Nov 2026 04:00:00 +0000

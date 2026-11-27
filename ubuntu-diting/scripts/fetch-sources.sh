@@ -102,7 +102,8 @@ fetch_ref() { # dir url [branch]
 # The trees a build needs, each at the commit pinned in config/diting.conf.
 inputs() {
 	printf '%s\n' audioreach-topology ar-audioreach-graphservices fastrpc hexagonrpc \
-		libssc iio-sensor-proxy libva-v4l2-stateful mobile-config-firefox ffmpeg
+		libssc iio-sensor-proxy libva-v4l2-stateful mobile-config-firefox ffmpeg \
+		qcom-va-driver
 }
 
 input() { # name
@@ -115,6 +116,7 @@ input() { # name
 	iio-sensor-proxy) need_ref "$1" "$IIO_SENSOR_PROXY_URL" "$IIO_SENSOR_PROXY_COMMIT" ;;
 	libva-v4l2-stateful) have_ref "$1" "$LIBVA_V4L2_URL" "$LIBVA_V4L2_COMMIT" ;;
 	mobile-config-firefox) have_ref "$1" "$MOBILE_CONFIG_FIREFOX_URL" "$MOBILE_CONFIG_FIREFOX_COMMIT" ;;
+	qcom-va-driver) have_ref "$1" "$QCOM_VA_DRIVER_URL" "$QCOM_VA_DRIVER_COMMIT" ;;
 	ffmpeg) fetch_ffmpeg ;;
 	*) die "no source named $1 (--help lists them)" ;;
 	esac
