@@ -612,8 +612,10 @@ rc_not 0 "$?"
 expect "usage: fetch-sources.sh"
 (cd "$TEST_TOP" && DITING_NOTHP=0 bash "$S/fetch-sources.sh" --help >"$W/out.txt" 2>&1)
 rc_is 0 "$?"
-checkdesc="the names of the seven trees that are only read and of the eight a build needs"
-check test "$(grep -cE '^[a-z0-9-]+$' "$W/out.txt")" -eq 15
+# seven trees that are only read, nine that a build needs; the sixteenth
+# name is ffmpeg, which 7daa6ed added without this count
+checkdesc="the names of the seven trees that are only read and of the nine a build needs"
+check test "$(grep -cE '^[a-z0-9-]+$' "$W/out.txt")" -eq 16
 # What the requirement comes down to, where it is written down.
 F="$SRC/ubuntu-diting/scripts/fetch-sources.sh"
 checkdesc="fetch-sources.sh without an argument fetches the kernel and nothing else"
