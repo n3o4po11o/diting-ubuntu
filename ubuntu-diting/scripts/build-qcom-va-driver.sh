@@ -8,12 +8,14 @@
 #   ci/ffmpeg.sh make qcom-va-driver          in the privileged container on the build server (ci/FFMPEG.md)
 #
 # What comes out, in output/debs/:
-#   qcom-va-driver_*.deb          qcom_drv_video.so, and nothing under the
-#                                 msm and v4l2 names: libva-v4l2-stateful keeps
-#                                 those and decodes for the browsers, so the two
-#                                 stand side by side, and a program picks this
-#                                 one with LIBVA_DRIVER_NAME=qcom
-#   qcom-va-driver-tests_*.deb    the hardware tests of upstream, for the phone
+#   qcom-va-driver_*.deb          qcom_drv_video.so, and msm_drv_video.so as a
+#                                 link to it: the name libva derives from the
+#                                 msm DRM driver, so this is the default driver
+#                                 (encoder and decoders) and no program needs
+#                                 LIBVA_DRIVER_NAME. libva-v4l2-stateful keeps
+#                                 the v4l2 name for snap Chromium's own copy.
+#   qcom-va-driver-tests_*.deb    the hardware tests of upstream, for the phone;
+#                                 they open the default driver
 # The build log is output/logs/qcom-va-driver-build.log.
 . "$(dirname "$0")/lib.sh"
 . "$(dirname "$0")/lib-buildd.sh"

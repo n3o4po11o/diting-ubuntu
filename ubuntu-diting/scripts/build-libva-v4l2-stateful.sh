@@ -1,5 +1,7 @@
 #!/bin/bash
-# Build the VA-API driver for the iris video decoder (libva-v4l2-stateful,
+# Build the VA-API driver for the iris video decoder (libva-v4l2-stateful;
+# under the v4l2 name only, for snap Chromium's own copy - the msm name, the
+# default, is qcom-va-driver's, see build-qcom-va-driver.sh;
 # upstream commit below plus packages/libva-v4l2-stateful/*.patch) as a local
 # Debian package, in the arm64 buildd chroot (lib-buildd.sh). Needs sudo.
 . "$(dirname "$0")/lib.sh"
