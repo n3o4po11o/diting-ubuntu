@@ -825,3 +825,35 @@ VMID 11；核心的复位和掉电要按原厂驱动的顺序来。diting 的设
 上游 `async` 的“逐帧等结果与排 8 帧的码流必须相同”因此 80 遍败 3 遍。驱动里在请求之后、送缓冲
 之前等 1 毫秒（`qcom-va-driver` 的补丁 0003）：500 轮、1 万次请求没有一次（对照组 189 轮 3 次）。
 这是用户态的缓解；固件内部发生了什么没有查清。
+
+### 第五批：Wi-Fi 链路的 ASPM L0s（0138，2026-11-28）
+
+这一批不来自 liuqin。对方的 348 个提交里跟 PCIe 有关的只有 `f88eb7add702`（0225，WIP，PHY 用原厂
+序列，值和我们的 0018 相同），最终设备树只有 `&pcie0 { status = "okay" }`，没有任何 ASPM 相关的处理，
+kit 的文档里也没有 AER。同 SoC、同网卡（`17cb:1103`）、同一套上游代码，所以它同样开着 L0s，同样会
+报（按代码推断，没有在 liuqin 设备上量）。来源是上游对 sc8280xp 的做法，属于 §3、§4 那一路：上游
+已经做过的，照它做。
+
+| 编号 | 来源 | 内容 |
+| --- | --- | --- |
+| 0138 | 照上游 Johan Hovold 的 "PCI: qcom: Disable ASPM L0s for sc8280xp, sa8540p and sa8295p"（v4，2024-03；它修的是 `9f4f3dfad8cf` "Enable ASPM for platforms supporting 1.9.0 ops" 带来的错误，和我们走的是同一个 1.9.0 操作集） | SM8475 PCIe0 自己的 compatible `qcom,pcie-sm8475-pcie0`；驱动里给它带 `no_l0s` 的配置项（`qcom_pcie_clear_aspm_l0s()` 在 PCI 核心配置链路之前清掉根端口的 L0s 能力位，之后没有代码再写回）；绑定文件加一行；`sm8475.dtsi` 的 `&pcie0` 改用它。L1 和 L1 子状态保留 |
+
+上游 v3 的 X13s 补丁写的是（SC8280XP + 同款 `17cb:1103`）："Enabling ASPM L0s on the Lenovo Thinkpad
+X13s results in Correctable Errors (BadTLP, Timeout) when accessing the Wi-Fi controller"；v4 的说明里
+Qualcomm 确认这些平台的 PHY 没有为 L0s 调过。原厂设备树里这台手机的 `pcie0` 和 `pcie1` 都写着
+`qcom,no-l0s-supported`。
+
+**手机上读到的**（2026-11-28；日志在 `release/driver-fix-batch6-pcie-l0s/`，工作区）：
+
+| 项目 | 刷之前（内核开着 L0s） | 刷之后（0138，05:18 起） |
+| --- | --- | --- |
+| 链路两端 `LnkCtl` | `ASPM L0s L1 Enabled` | `ASPM L1 Enabled`；L1.1/L1.2 四个子状态都还开着 |
+| 开机日志 | `pci 0000:01:00.0: ASPM: default states L0s L1` | `pci 0000:01:00.0: ASPM: default states L1` |
+| 6 × 100 MB，间隔 3 秒 | 0 次 | 0 次，55-59 MB/s |
+| 4 MB 突发、间隔 30-100 ms，每 100 秒的可纠正错误 | 3、4、4 次（策略 `default`）；去掉 L1 子状态（`powersave`）4 次；`performance` 全关 0、0 次 | 0、0、0 次（1353 次突发） |
+| 不可纠正错误、断线 | 无 | 无 |
+
+测量本身分不开 L0s 和普通 L1（运行时没有“只留 L1”的策略）；归到 L0s 靠的是上游在 X13s 上的结论和
+原厂设备树，补丁之后计数归零是这边的验证。镜像是在手机上原有的那两个里换了内核和设备树的两个
+字节；手机上跑的内核是 rootfs 软件包自带的，不是 batch 4 的；没有写任何模块。`dtbs_check` 没有跑成
+（容器镜像里装不上 dtschema，见 release 的 README）。

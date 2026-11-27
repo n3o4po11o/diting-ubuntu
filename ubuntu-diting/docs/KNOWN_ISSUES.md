@@ -501,19 +501,34 @@ Which driver a browser decodes with, since 2026-11-28:
   the same way. `https://8.8.8.8/dns-query` answered with Google
   addresses and the certificate `CN=dns.google` again at 02:58. Still
   not changed: the owner's decision.
-- **PCIe correctable errors from the Wi-Fi chip under load are not the
-  problem** (2026-11-28, checked after the owner saw
+- **PCIe correctable errors from the Wi-Fi chip were ASPM L0s** (found and
+  fixed 2026-11-28, patch 0138; the first note of that day, that they "are
+  not the problem", was right about their effect and wrong in leaving it
+  there). The owner saw
   `ath11k_pci 0000:01:00.0: PCIe Bus Error: severity=Correctable, type=Data
-  Link Layer, (Transmitter ID) ... [12] Timeout` while the 4K test ran).
-  They do follow heavy receiving: 8 lines in the 40 s in which the phone
-  downloaded 80 MB of video, and 2 lines during 150 MB pushed to it over
-  the LAN, none during 100 MB sent. But they are correctable - no
-  uncorrected error, no ath11k reload or reset, no Wi-Fi disconnect in
-  five hours of uptime, about 21 lines in nine bursts, seven of them
-  during ordinary use - and the link keeps its speed while they happen:
-  36 MB/s received, 22.6 MB/s sent over the LAN, 11.5 MB/s for the
-  video chunks. Different from the 80-90 per cent transmit failures after
-  ath11k reloads (above): those were after reloads, there were none.
+  Link Layer, (Transmitter ID) ... [12] Timeout` - Replay Timer Timeout in
+  the chip - and the root port logs the other half, `(Receiver ID) ...
+  [ 6] BadTLP`. They are correctable - no uncorrected error, no ath11k
+  reload or reset, no Wi-Fi disconnect - and the link keeps its speed
+  while they happen. They follow how often the link leaves its low-power
+  states, not the amount of data: six downloads of 100 MB with pauses gave
+  none; 4 MB bursts with gaps of 30 to 100 ms gave 3 to 4 per 100 s (11 in
+  300 s), the same with the L1 substates off, and none in 200 s with ASPM
+  off through the policy. The kernel enables L0s and L1 on the links of a
+  devicetree platform by default (`ASPM: default states L0s L1` at every
+  boot) and the driver asks for every state; the stock device tree of the
+  phone says `qcom,no-l0s-supported`, and upstream disables L0s for
+  sc8280xp, sa8540p and sa8295p for the same two errors on the same Wi-Fi
+  chip in the ThinkPad X13s (Johan Hovold, 2024: Qualcomm confirmed that
+  the PHY configuration there is not tuned for L0s). Patch 0138 gives
+  SM8475 PCIe0 its own compatible and the configuration with `no_l0s`, as
+  sc8280xp has. On the phone since 2026-11-28 05:18: the link is `ASPM L1
+  Enabled` on both ends with the L1 substates on, and the burst pattern
+  gives 0 in 300 s. Left: PCIe1 has the same property in the stock tree
+  and nothing on this phone; the L1 substates run on the upstream timings,
+  not on the vendor's 5 ms timeout. `release/driver-fix-batch6-pcie-l0s/`.
+  Different from the 80-90 per cent transmit failures after ath11k
+  reloads (above): those were after reloads, there were none.
 - **`[drm:dpu_crtc_get_vblank_counter [msm]] *ERROR* no encoder found for
   crtc 0` is a message, not a fault** (2026-11-28; twelve lines in the
   five hours since boot, two under the PCIe lines the owner sent).
