@@ -344,8 +344,16 @@ nothing else, picked with `LIBVA_DRIVER_NAME=qcom`, and the default was
   times in 42 s the first time and three the second. Other runs of the same
   kind, and 56 processes in a row that only initialized the driver, were
   followed by a clean suspend, and so was every real encode session. The
-  core suspended by itself each time. Not characterized further; a browser
-  initializes once.
+  core suspended by itself each time. What the message means, read from
+  the driver's source (2026-11-28): the runtime PM's idle suspend,
+  `iris_hfi_pm_suspend()` in `iris_hfi_common.c`, asks
+  `iris_vpu_prepare_pc()` in `iris_vpu_common.c` whether the firmware
+  is ready to be powered down (PC_READY, the WFI bit and the idle bit
+  together); when it is not, the function prints "skip power collapse"
+  - at error level - and returns `-EAGAIN`, and the autosuspend is
+  simply due again. A browser initializes once; one such pair was
+  logged at 02:34:01 after an afternoon of YouTube, and a decode run
+  three minutes later was clean.
 
 ### Browser video decoding (VA-API over V4L2)
 
@@ -384,6 +392,27 @@ Which driver a browser decodes with, since 2026-11-28:
   levels it starts with came as AV1, which this SoC has no decoder for
   and `Dav1dVideoDecoder` takes in software - the usual case for a
   phone-sized window, where YouTube never asks for 2160p.
+- **AV1 in software is not what stalls YouTube** (2026-11-28, 02:38-02:57,
+  after the owner asked whether AV1 could not be decoded in software: a
+  video had shown nothing for seconds, tens of seconds and minutes while
+  data kept arriving). Left to itself in a phone-sized window, YouTube
+  starts that day's video as AV1 854x480: `Dav1dVideoDecoder`,
+  `kIsPlatformVideoDecoder false`, first frame 3-4 s after the
+  navigation, 30 frames a second, 6-8 dropped in 75 s, the whole browser
+  at 40-140 per cent of the eight cores. The same video with the quality
+  forced to 1080p held 27-35 frames a second at 100-170 per cent. Local
+  clips then, with no network in the way (10 s, 30 fps, cut by
+  `liqin-study/scripts/phone-av1-gen.sh` and played by
+  `phone-av1-local.py`; simple content, scaled from the H.264 test
+  clip) - frames a second, and the browser's share of the eight cores:
+  AV1 1080p 32 and 83 per cent, 1440p 33 and 156, 2160p 33 and 233,
+  none dropped and not one interrupt from the video core; VP9 1080p in
+  `VaapiVideoDecoder` 32 and 17, VP9 2160p 33 and 22. So software AV1
+  keeps up to 2160p30 at eight to ten times the hardware decoder's CPU;
+  real footage is heavier than these clips, and 2160p60 was not
+  measured. Chromium tells pages that AV1 is "supported, smooth, not
+  power efficient" at 1080p and at 4K60 alike, which is why YouTube
+  picks it for the low levels.
 - **A video on YouTube taking long to start was the owner's network, not
   the browser or the driver** (2026-11-28). The Wi-Fi connection hands
   out 223.5.5.5 and 223.6.6.6, and for `*.googlevideo.com` their answers
@@ -398,12 +427,40 @@ Which driver a browser decodes with, since 2026-11-28:
   answered in 0.09-1.0 s, the four that resolved to bogus ones failed
   (5.4 s timeout, or TLS reset); the same four forced to the address
   Google's DoH gives answered in 0.13-0.9 s. `www.youtube.com` itself
-  resolved to Google every time, which is why the page opens and the
-  video does not. Google's DoH is reachable from this network by name
-  and by address (`https://dns.google/dns-query`,
+  resolved to Google every time in those tests, which is why the page
+  opened and the video did not. Google's DoH is reachable from this
+  network by name and by address (`https://dns.google/dns-query`,
   `https://8.8.8.8/dns-query`, five of five each). Not changed: the fix
   belongs in the router's DNS or in Chromium's "Use secure DNS"
   setting, and the owner has not said which.
+- **The same lottery keeps the page itself from opening** (2026-11-28,
+  02:34-02:55, read from Chromium's own network log, `--log-net-log`,
+  with `liqin-study/scripts/netlog-peek.py`; the probe is
+  `yt-stall-probe.py`). Eight attempts of a probe browser with a fresh
+  profile to open a watch page: four played, four stayed on the error
+  page, one of them for the whole 90 s. In that one nine names were
+  looked up at start and six were answered with addresses outside
+  Google's ranges - `www.youtube.com` to `69.171.235.22` (Facebook);
+  `redirector.gvt1.com` and a `gvt1-cn.com` node to `58.63.233.33` and
+  `.69`; `update.googleapis.com`, `dl.google.com` and
+  `safebrowsing.googleapis.com` to `113.108.239.161` and `.225`. The
+  request for the page was tried four times (from 0.5, 12.8, 28.7 and
+  69.8 s after start), each ending after about 11 s with
+  `ERR_CONNECTION_CLOSED` in the TLS handshake: twenty connection
+  attempts, every one to `69.171.235.22`. The bad answer stays in the
+  browser's cache, so trying again asks for the same address. In the
+  launch that played at 02:47, `www.youtube.com` and the three video
+  nodes had drawn Google addresses and 9 of the 20 names looked up had
+  not (`dl.google.com`, `fonts.googleapis.com`, `fonts.gstatic.com`,
+  `www.gstatic.com`, ...). That is "downloading but nothing plays for
+  minutes": whatever loses the lottery waits, whatever wins it keeps
+  arriving. The stall the owner described at 02:29 fits this and not
+  AV1: by 02:30 the browser was playing in hardware (205 interrupts a
+  second from the video core, the whole browser at 109-119 per cent),
+  and four of the eight pages opened the same night lost the lottery
+  the same way. `https://8.8.8.8/dns-query` answered with Google
+  addresses and the certificate `CN=dns.google` again at 02:58. Still
+  not changed: the owner's decision.
 - **PCIe correctable errors from the Wi-Fi chip under load are not the
   problem** (2026-11-28, checked after the owner saw
   `ath11k_pci 0000:01:00.0: PCIe Bus Error: severity=Correctable, type=Data
@@ -417,9 +474,26 @@ Which driver a browser decodes with, since 2026-11-28:
   36 MB/s received, 22.6 MB/s sent over the LAN, 11.5 MB/s for the
   video chunks. Different from the 80-90 per cent transmit failures after
   ath11k reloads (above): those were after reloads, there were none.
-  (`[drm:dpu_crtc_get_vblank_counter] *ERROR* no encoder found for crtc 0`
-  in the same log is the display going on and off, twelve times since
-  boot; it has nothing to do with the network.)
+- **`[drm:dpu_crtc_get_vblank_counter [msm]] *ERROR* no encoder found for
+  crtc 0` is a message, not a fault** (2026-11-28; twelve lines in the
+  five hours since boot, two under the PCIe lines the owner sent).
+  `dpu_crtc_get_vblank_counter()` in `drivers/gpu/drm/msm/disp/dpu1/
+  dpu_crtc.c` looks for the encoder attached to CRTC 0; when the CRTC's
+  current state has none it prints this and returns 0 - the frame
+  counter the vblank path asked for comes back as zero, nothing else
+  happens. The first three moments are windows coming up: 21:27:24 and
+  six at 21:27:30 around the first unlock, 21:29:47 as Firefox started
+  from phosh; 21:42:11 came nine seconds after a modeset, 21:55:17 with
+  nothing logged beside it; 02:06:36 and 02:13:07 as probe windows
+  appeared, phoc logging `Atomic commit failed: Device or resource busy`
+  eight seconds before the last. A function trace of the 15 s after
+  another window came up (02:25) caught 844 calls of the function,
+  every one from the vblank interrupt path, and none printed the
+  message. So the caller is not pinned down; what is known is that it
+  has nothing to do with the network or with video decoding, and that
+  the first version of this note - the display going on and off - was
+  wrong: none of the twelve is within 3 s of phoc turning the panel
+  off.
 - **The first three launches of the deb from the desktop crashed**
   (2026-11-28, 01:21-01:23); later ones from the same icon ran (01:40,
   01:51). Each died about 1.3 s after start. The three dumps Chromium kept
@@ -430,9 +504,18 @@ Which driver a browser decodes with, since 2026-11-28:
   not reproduced: 25 launches from a shell, with and without the flags the
   snap had, with a fresh profile and with the default one, under phosh's
   environment and its activation token, under its file-descriptor limit,
-  and through `gio launch`, all ran. Left unexplained.
+  and through `gio launch`, all ran. Left unexplained. **Not the desktop
+  launcher's doing, though:** at 02:34:35 the same day a probe browser
+  started from a shell with a fresh profile, to time a YouTube page,
+  died 0.6 s after start, before it had navigated anywhere, with the
+  same two addresses (`chromium+0x10ccd9cc`, called from
+  `+0x10ccd908`; main thread, GLib dispatch, `x0 = -4`). The twelve
+  probe launches after it that night ran. (A browser started with
+  another `--user-data-dir` leaves its dump in the default profile's
+  `Crash Reports` all the same; the fourth is
+  `probe-launch-023435-345b6902.dmp` among the copies.)
   `liqin-study/scripts/minidump-peek.py` of the workspace reads such dumps
-  without symbols; copies of the three are in
+  without symbols; copies of the four are in
   `liqin-study/raw/vaenc-eval/default-driver-2026-11-28/crash-dumps/`.
 - **Snap Chromium** (158) stays on the old driver. A snap cannot read host
   libraries: `diting-chromium-vaapi` copies `v4l2_drv_video.so` into
