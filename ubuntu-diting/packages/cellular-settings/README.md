@@ -55,6 +55,18 @@ Apply), and uses ModemManager's method only where the tool is not.
   alone, 5G alone and 4G with 5G was written and dropped the same day: the
   owner stays with 3G, 4G, 5G.
 - **`State` comes as an int32** from this ModemManager, not a uint32.
+- **The Mobile data page said "Failed" while the modem was connected**
+  (the owner saw it on 2026-11-27; fixed the same day). The numbers of
+  NetworkManager's device state do not run in tens all the way: after
+  `IP_CONFIG` (70) come `IP_CHECK` (80), `SECONDARIES` (90), `ACTIVATED`
+  (100), `DEACTIVATING` (110) and `FAILED` (120). The first table had
+  "Connected" at 80 and "Failed" at 100, and a unit test repeated it. The
+  numbers were then read from the typelib of the libnm installed on the
+  phone (`NM.DeviceState` and `NM.DeviceStateReason`, through python3-gi),
+  and the tables of ModemManager the same way from its library
+  (`mm_modem_state_get_string` and the others, through ctypes): all as they
+  were. The page now says why a device is unavailable or failed
+  ("Failed: the dial was refused"), from `StateReason`.
 - **NetworkManager**: `org.freedesktop.NetworkManager.rules` lets an
   active local session of a user in the `sudo` or `netdev` group modify
   system connections, so the Mobile data page needs no privilege. Over

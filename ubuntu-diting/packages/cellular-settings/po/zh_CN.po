@@ -103,7 +103,7 @@ msgstr "没有选择网络模式"
 msgid "{}, because: {}"
 msgstr "{}, 原因：{}"
 
-#: src/main.rs:400 src/main.rs:603 src/modemmode.rs:343 src/names.rs:128
+#: src/main.rs:400 src/main.rs:609 src/modemmode.rs:343 src/names.rs:128
 msgid "None"
 msgstr "无"
 
@@ -129,7 +129,7 @@ msgstr "{}（基带读回的值）"
 
 #: src/main.rs:442 src/names.rs:15 src/names.rs:35 src/names.rs:67
 #: src/names.rs:80 src/names.rs:95 src/names.rs:105 src/names.rs:116
-#: src/names.rs:161
+#: src/names.rs:165
 msgid "Unknown"
 msgstr "未知"
 
@@ -195,33 +195,37 @@ msgstr "没有保存任何内容：开机时用基带自己的默认值。"
 msgid "{}; {}"
 msgstr "{}；{}"
 
-#: src/main.rs:593
+#: src/main.rs:596
+msgid "{}, {}: {}"
+msgstr "{}, {}: {}"
+
+#: src/main.rs:598
 msgid "{}, {}"
 msgstr "{}, {}"
 
-#: src/main.rs:594
+#: src/main.rs:600
 msgid "None: NetworkManager does not manage the modem"
 msgstr "无：NetworkManager 没有管理这个基带"
 
-#: src/main.rs:608
+#: src/main.rs:614
 msgid ""
 "More than one mobile data connection: the redial watchdog dials the first "
 "one, {}."
 msgstr "有多个移动数据连接：重拨看门狗拨的是第一个，{}。"
 
-#: src/main.rs:618
+#: src/main.rs:624
 msgid "Connect"
 msgstr "连接"
 
-#: src/main.rs:625
+#: src/main.rs:631
 msgid "Edit"
 msgstr "编辑"
 
-#: src/main.rs:627 src/ui.rs:597
+#: src/main.rs:633 src/ui.rs:597
 msgid "Delete"
 msgstr "删除"
 
-#: src/main.rs:639
+#: src/main.rs:645
 msgid "NetworkManager is not available: {}"
 msgstr "NetworkManager 不可用：{}"
 
@@ -269,7 +273,7 @@ msgstr "正在搜索"
 msgid "Registered"
 msgstr "已注册"
 
-#: src/names.rs:24 src/names.rs:170
+#: src/names.rs:24 src/names.rs:176
 msgid "Disconnecting"
 msgstr "正在断开"
 
@@ -277,7 +281,7 @@ msgstr "正在断开"
 msgid "Connecting"
 msgstr "正在连接"
 
-#: src/names.rs:26 src/names.rs:169
+#: src/names.rs:26 src/names.rs:175
 msgid "Connected"
 msgstr "已连接"
 
@@ -477,37 +481,161 @@ msgstr "服务选项暂时不可用"
 msgid "Network error {}"
 msgstr "网络错误 {}"
 
-#: src/names.rs:162
+#: src/names.rs:166
 msgid "Unmanaged"
 msgstr "未托管"
 
-#: src/names.rs:163
+#: src/names.rs:167
 msgid "Unavailable"
 msgstr "不可用"
 
-#: src/names.rs:164
+#: src/names.rs:168
 msgid "Disconnected"
 msgstr "已断开"
 
-#: src/names.rs:165
+#: src/names.rs:169
 msgid "Preparing"
 msgstr "正在准备"
 
-#: src/names.rs:166
+#: src/names.rs:170
 msgid "Configuring"
 msgstr "正在配置"
 
-#: src/names.rs:167
+#: src/names.rs:171
 msgid "Needs authentication"
 msgstr "需要认证"
 
-#: src/names.rs:168
+#: src/names.rs:172
 msgid "Configuring IP"
 msgstr "正在配置 IP"
 
-#: src/names.rs:171
+#: src/names.rs:173
+msgid "Checking the connection"
+msgstr "正在检查连接"
+
+#: src/names.rs:174
+msgid "Waiting for other connections"
+msgstr "正在等待其他连接"
+
+#: src/names.rs:177
 msgid "Failed"
 msgstr "失败"
+
+#: src/names.rs:188
+msgid "for an unknown reason"
+msgstr "原因不明"
+
+#: src/names.rs:189
+msgid "NetworkManager stopped managing it"
+msgstr "NetworkManager 不再管理它"
+
+#: src/names.rs:190
+msgid "its settings could not be applied"
+msgstr "设置没能生效"
+
+#: src/names.rs:191
+msgid "no address was received"
+msgstr "没有拿到地址"
+
+#: src/names.rs:192
+msgid "a password or a PIN is missing"
+msgstr "缺少密码或 PIN"
+
+#: src/names.rs:193
+msgid "the modem was busy"
+msgstr "基带正忙"
+
+#: src/names.rs:194
+msgid "the modem found no network to dial on"
+msgstr "基带找不到可以拨号的网络"
+
+#: src/names.rs:195
+msgid "the modem lost the network"
+msgstr "基带失去了网络"
+
+#: src/names.rs:196
+msgid "the dial got no answer in time"
+msgstr "拨号超时，没有回应"
+
+#: src/names.rs:197
+msgid "the dial was refused"
+msgstr "拨号被拒绝"
+
+#: src/names.rs:198
+msgid "the modem did not start"
+msgstr "基带没有启动"
+
+#: src/names.rs:199
+msgid "the access point (APN) was refused"
+msgstr "接入点（APN）被拒绝"
+
+#: src/names.rs:200
+msgid "the modem is not looking for a network"
+msgstr "基带没有在搜索网络"
+
+#: src/names.rs:201
+msgid "the network refused the registration"
+msgstr "网络拒绝了注册"
+
+#: src/names.rs:202
+msgid "no network was found in time"
+msgstr "没能在时限内找到网络"
+
+#: src/names.rs:203
+msgid "the registration failed"
+msgstr "注册失败"
+
+#: src/names.rs:204
+msgid "the SIM PIN was wrong"
+msgstr "SIM 卡的 PIN 不对"
+
+#: src/names.rs:205
+msgid "the modem was removed"
+msgstr "基带被移除"
+
+#: src/names.rs:206
+msgid "the modem is asleep"
+msgstr "基带在休眠"
+
+#: src/names.rs:207
+msgid "NetworkManager found no modem"
+msgstr "NetworkManager 找不到基带"
+
+#: src/names.rs:208
+msgid "no SIM is inserted"
+msgstr "没有插 SIM 卡"
+
+#: src/names.rs:209
+msgid "the SIM asks for its PIN"
+msgstr "SIM 卡要求输入 PIN"
+
+#: src/names.rs:210
+msgid "the SIM asks for its PUK"
+msgstr "SIM 卡要求输入 PUK"
+
+#: src/names.rs:211
+msgid "the SIM is not allowed on this network"
+msgstr "这张 SIM 卡不允许在这个网络上使用"
+
+#: src/names.rs:212
+msgid "ModemManager is not running"
+msgstr "ModemManager 没有在运行"
+
+#: src/names.rs:213
+msgid "the modem failed"
+msgstr "基带出错"
+
+#: src/names.rs:214
+msgid "the PIN was wrong"
+msgstr "PIN 不对"
+
+#: src/names.rs:215
+msgid "networking is switched off"
+msgstr "网络已关闭"
+
+#: src/names.rs:216
+msgid "reason {}"
+msgstr "原因码 {}"
 
 #: src/ui.rs:128
 msgid ""

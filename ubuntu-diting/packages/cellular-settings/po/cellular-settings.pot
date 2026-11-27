@@ -103,7 +103,7 @@ msgstr ""
 msgid "{}, because: {}"
 msgstr ""
 
-#: src/main.rs:400 src/main.rs:603 src/modemmode.rs:343 src/names.rs:128
+#: src/main.rs:400 src/main.rs:609 src/modemmode.rs:343 src/names.rs:128
 msgid "None"
 msgstr ""
 
@@ -127,7 +127,7 @@ msgstr ""
 msgid "{} (as the modem reports it)"
 msgstr ""
 
-#: src/main.rs:442 src/names.rs:15 src/names.rs:35 src/names.rs:67 src/names.rs:80 src/names.rs:95 src/names.rs:105 src/names.rs:116 src/names.rs:161
+#: src/main.rs:442 src/names.rs:15 src/names.rs:35 src/names.rs:67 src/names.rs:80 src/names.rs:95 src/names.rs:105 src/names.rs:116 src/names.rs:165
 msgid "Unknown"
 msgstr ""
 
@@ -179,31 +179,35 @@ msgstr ""
 msgid "{}; {}"
 msgstr ""
 
-#: src/main.rs:593
+#: src/main.rs:596
+msgid "{}, {}: {}"
+msgstr ""
+
+#: src/main.rs:598
 msgid "{}, {}"
 msgstr ""
 
-#: src/main.rs:594
+#: src/main.rs:600
 msgid "None: NetworkManager does not manage the modem"
 msgstr ""
 
-#: src/main.rs:608
+#: src/main.rs:614
 msgid "More than one mobile data connection: the redial watchdog dials the first one, {}."
 msgstr ""
 
-#: src/main.rs:618
+#: src/main.rs:624
 msgid "Connect"
 msgstr ""
 
-#: src/main.rs:625
+#: src/main.rs:631
 msgid "Edit"
 msgstr ""
 
-#: src/main.rs:627 src/ui.rs:597
+#: src/main.rs:633 src/ui.rs:597
 msgid "Delete"
 msgstr ""
 
-#: src/main.rs:639
+#: src/main.rs:645
 msgid "NetworkManager is not available: {}"
 msgstr ""
 
@@ -251,7 +255,7 @@ msgstr ""
 msgid "Registered"
 msgstr ""
 
-#: src/names.rs:24 src/names.rs:170
+#: src/names.rs:24 src/names.rs:176
 msgid "Disconnecting"
 msgstr ""
 
@@ -259,7 +263,7 @@ msgstr ""
 msgid "Connecting"
 msgstr ""
 
-#: src/names.rs:26 src/names.rs:169
+#: src/names.rs:26 src/names.rs:175
 msgid "Connected"
 msgstr ""
 
@@ -459,36 +463,160 @@ msgstr ""
 msgid "Network error {}"
 msgstr ""
 
-#: src/names.rs:162
+#: src/names.rs:166
 msgid "Unmanaged"
 msgstr ""
 
-#: src/names.rs:163
+#: src/names.rs:167
 msgid "Unavailable"
 msgstr ""
 
-#: src/names.rs:164
+#: src/names.rs:168
 msgid "Disconnected"
 msgstr ""
 
-#: src/names.rs:165
+#: src/names.rs:169
 msgid "Preparing"
 msgstr ""
 
-#: src/names.rs:166
+#: src/names.rs:170
 msgid "Configuring"
 msgstr ""
 
-#: src/names.rs:167
+#: src/names.rs:171
 msgid "Needs authentication"
 msgstr ""
 
-#: src/names.rs:168
+#: src/names.rs:172
 msgid "Configuring IP"
 msgstr ""
 
-#: src/names.rs:171
+#: src/names.rs:173
+msgid "Checking the connection"
+msgstr ""
+
+#: src/names.rs:174
+msgid "Waiting for other connections"
+msgstr ""
+
+#: src/names.rs:177
 msgid "Failed"
+msgstr ""
+
+#: src/names.rs:188
+msgid "for an unknown reason"
+msgstr ""
+
+#: src/names.rs:189
+msgid "NetworkManager stopped managing it"
+msgstr ""
+
+#: src/names.rs:190
+msgid "its settings could not be applied"
+msgstr ""
+
+#: src/names.rs:191
+msgid "no address was received"
+msgstr ""
+
+#: src/names.rs:192
+msgid "a password or a PIN is missing"
+msgstr ""
+
+#: src/names.rs:193
+msgid "the modem was busy"
+msgstr ""
+
+#: src/names.rs:194
+msgid "the modem found no network to dial on"
+msgstr ""
+
+#: src/names.rs:195
+msgid "the modem lost the network"
+msgstr ""
+
+#: src/names.rs:196
+msgid "the dial got no answer in time"
+msgstr ""
+
+#: src/names.rs:197
+msgid "the dial was refused"
+msgstr ""
+
+#: src/names.rs:198
+msgid "the modem did not start"
+msgstr ""
+
+#: src/names.rs:199
+msgid "the access point (APN) was refused"
+msgstr ""
+
+#: src/names.rs:200
+msgid "the modem is not looking for a network"
+msgstr ""
+
+#: src/names.rs:201
+msgid "the network refused the registration"
+msgstr ""
+
+#: src/names.rs:202
+msgid "no network was found in time"
+msgstr ""
+
+#: src/names.rs:203
+msgid "the registration failed"
+msgstr ""
+
+#: src/names.rs:204
+msgid "the SIM PIN was wrong"
+msgstr ""
+
+#: src/names.rs:205
+msgid "the modem was removed"
+msgstr ""
+
+#: src/names.rs:206
+msgid "the modem is asleep"
+msgstr ""
+
+#: src/names.rs:207
+msgid "NetworkManager found no modem"
+msgstr ""
+
+#: src/names.rs:208
+msgid "no SIM is inserted"
+msgstr ""
+
+#: src/names.rs:209
+msgid "the SIM asks for its PIN"
+msgstr ""
+
+#: src/names.rs:210
+msgid "the SIM asks for its PUK"
+msgstr ""
+
+#: src/names.rs:211
+msgid "the SIM is not allowed on this network"
+msgstr ""
+
+#: src/names.rs:212
+msgid "ModemManager is not running"
+msgstr ""
+
+#: src/names.rs:213
+msgid "the modem failed"
+msgstr ""
+
+#: src/names.rs:214
+msgid "the PIN was wrong"
+msgstr ""
+
+#: src/names.rs:215
+msgid "networking is switched off"
+msgstr ""
+
+#: src/names.rs:216
+msgid "reason {}"
 msgstr ""
 
 #: src/ui.rs:128

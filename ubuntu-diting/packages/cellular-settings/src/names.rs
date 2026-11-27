@@ -155,7 +155,11 @@ pub fn network_error(error: u32) -> String {
 	}
 }
 
-/// `NMDeviceState`
+/// `NMDeviceState`. The numbers are not a run in tens: after IP_CONFIG (70)
+/// come IP_CHECK (80), SECONDARIES (90), ACTIVATED (100), DEACTIVATING (110)
+/// and FAILED (120). Read from the typelib of libnm 1.54.3 on the phone on
+/// 2026-11-27: the first version of this table had ACTIVATED at 80 and
+/// FAILED at 100, so the modem showed "Failed" while it was connected.
 pub fn device_state(state: u32) -> String {
 	match state {
 		0 => t!("Unknown"),
@@ -166,11 +170,51 @@ pub fn device_state(state: u32) -> String {
 		50 => t!("Configuring"),
 		60 => t!("Needs authentication"),
 		70 => t!("Configuring IP"),
-		80 => t!("Connected"),
-		90 => t!("Disconnecting"),
-		100 => t!("Failed"),
+		80 => t!("Checking the connection"),
+		90 => t!("Waiting for other connections"),
+		100 => t!("Connected"),
+		110 => t!("Disconnecting"),
+		120 => t!("Failed"),
 		_ => unknown(state),
 	}
+}
+
+/// `NMDeviceStateReason` of libnm 1.54.3, the numbers a modem can have, in
+/// plain words; a clause that follows "Failed:" or "Unavailable:". `None`
+/// for NONE (0), which is no reason. Any other number is named by number.
+pub fn device_reason(reason: u32) -> Option<String> {
+	Some(match reason {
+		0 => return None,
+		1 => t!("for an unknown reason"),
+		3 => t!("NetworkManager stopped managing it"),
+		4 => t!("its settings could not be applied"),
+		5 => t!("no address was received"),
+		7 => t!("a password or a PIN is missing"),
+		23 => t!("the modem was busy"),
+		24 => t!("the modem found no network to dial on"),
+		25 => t!("the modem lost the network"),
+		26 => t!("the dial got no answer in time"),
+		27 => t!("the dial was refused"),
+		28 => t!("the modem did not start"),
+		29 => t!("the access point (APN) was refused"),
+		30 => t!("the modem is not looking for a network"),
+		31 => t!("the network refused the registration"),
+		32 => t!("no network was found in time"),
+		33 => t!("the registration failed"),
+		34 => t!("the SIM PIN was wrong"),
+		36 => t!("the modem was removed"),
+		37 => t!("the modem is asleep"),
+		43 => t!("NetworkManager found no modem"),
+		45 => t!("no SIM is inserted"),
+		46 => t!("the SIM asks for its PIN"),
+		47 => t!("the SIM asks for its PUK"),
+		48 => t!("the SIM is not allowed on this network"),
+		52 => t!("ModemManager is not running"),
+		57 => t!("the modem failed"),
+		59 => t!("the PIN was wrong"),
+		78 => t!("networking is switched off"),
+		n => t!("reason {}", n),
+	})
 }
 
 #[cfg(test)]
@@ -193,6 +237,17 @@ mod tests {
 		assert_eq!(eps_ue_mode(2), "EPS only, data-centric");
 		assert_eq!(failed_reason(0), None);
 		assert_eq!(failed_reason(2).as_deref(), Some("SIM missing"));
-		assert_eq!(device_state(80), "Connected");
+	}
+
+	#[test]
+	fn the_connected_modem_is_not_the_failed_one() {
+		// NM_DEVICE_STATE_ACTIVATED is 100, FAILED is 120 (libnm 1.54.3)
+		assert_eq!(device_state(100), "Connected");
+		assert_eq!(device_state(120), "Failed");
+		assert_eq!(device_state(110), "Disconnecting");
+		assert_eq!(device_state(130), "Unknown (130)");
+		assert_eq!(device_reason(0), None);
+		assert_eq!(device_reason(27).as_deref(), Some("the dial was refused"));
+		assert_eq!(device_reason(99).as_deref(), Some("reason 99"));
 	}
 }

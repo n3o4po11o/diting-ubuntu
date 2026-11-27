@@ -38,6 +38,8 @@ pub struct Device {
 	/// for a modem, the object path of the modem in ModemManager
 	pub udi: String,
 	pub state: u32,
+	/// why NetworkManager put it in that state: `NMDeviceStateReason`
+	pub reason: u32,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -97,6 +99,8 @@ fn device(conn: &Connection, path: &str) -> zbus::Result<Device> {
 		device_type: proxy.get_property("DeviceType")?,
 		udi: proxy.get_property("Udi")?,
 		state: proxy.get_property("State")?,
+		// (state, reason): the state it was in when the reason was given
+		reason: proxy.get_property::<(u32, u32)>("StateReason")?.1,
 	})
 }
 

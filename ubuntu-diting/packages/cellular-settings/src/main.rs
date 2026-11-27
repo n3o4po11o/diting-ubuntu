@@ -599,7 +599,13 @@ impl App {
 		match &snapshot.data {
 			Ok(state) => {
 				let device = match &state.device {
-					Some(device) => t!("{}, {}", &device.interface, names::device_state(device.state)),
+					// why, for the two states that leave the user asking
+					Some(device) => match names::device_reason(device.reason) {
+						Some(reason) if matches!(device.state, 20 | 120) => {
+							t!("{}, {}: {}", &device.interface, names::device_state(device.state), reason)
+						}
+						_ => t!("{}, {}", &device.interface, names::device_state(device.state)),
+					},
 					None => t!("None: NetworkManager does not manage the modem"),
 				};
 				show(&self.w.data.device, Some(device));
