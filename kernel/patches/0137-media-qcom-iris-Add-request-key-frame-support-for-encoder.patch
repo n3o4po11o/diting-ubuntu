@@ -1,0 +1,148 @@
+From 812c1649e490c0b141d396d8b2c0846e9b76e85c Mon Sep 17 00:00:00 2001
+From: Wangao Wang <wangao.wang@oss.qualcomm.com>
+Date: Thu, 23 Jul 2026 10:55:55 +0800
+Subject: [PATCH] media: qcom: iris: Add request key frame support for encoder
+
+Add request key frame support for both gen1 and gen2 encoders by enabling
+V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME.
+
+Reviewed-by: Bryan O'Donoghue <bryan.odonoghue@linaro.org>
+Reviewed-by: Vishnu Reddy <busanna.reddy@oss.qualcomm.com>
+Reviewed-by: Vikash Garodia <vikash.garodia@oss.qualcomm.com>
+Signed-off-by: Wangao Wang <wangao.wang@oss.qualcomm.com>
+
+[ported by hand from
+https://lore.kernel.org/linux-media/20260723-dynamic_encode-v4-2-5fd6bd549ead@oss.qualcomm.com/,
+part 2/2 of "add dynamic encoder properties" v4, which is in 7.3: the gen2
+half only. The gen1 half (the sm8250 table, the packet builder and its HFI
+define) is left out, and so is 1/2 of the series, which is gen1 only. In
+7.2.10 REQUEST_SYNC_FRAME goes after DISPLAY_DELAY, where the project's
+decode-order patch ends the enum; inst_fw_cap_sm8550_enc is the one encoder
+table of gen2 there, and SM8450 uses it too.
+
+It is the control the VA-API driver with an encoder over the iris encoder
+writes for every IDR a client asks for (docs/VIDEO_ENCODE.md): without it,
+the second key frame of a session fails.]
+---
+ drivers/media/platform/qcom/iris/iris_ctrls.c | 22 +++++++++++++++++++
+ drivers/media/platform/qcom/iris/iris_ctrls.h |  1 +
+ .../media/platform/qcom/iris/iris_hfi_gen2.c  | 12 +++++++++-
+ .../qcom/iris/iris_hfi_gen2_defines.h         |  7 ++++++
+ .../platform/qcom/iris/iris_platform_common.h |  1 +
+ 5 files changed, 42 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/media/platform/qcom/iris/iris_ctrls.c b/drivers/media/platform/qcom/iris/iris_ctrls.c
+index 4da2146..b681112 100644
+--- a/drivers/media/platform/qcom/iris/iris_ctrls.c
++++ b/drivers/media/platform/qcom/iris/iris_ctrls.c
+@@ -158,6 +158,8 @@ static enum platform_inst_fw_cap_type iris_get_cap_id(u32 id)
+ 		return LAYER4_BITRATE_HEVC;
+ 	case V4L2_CID_MPEG_VIDEO_HEVC_HIER_CODING_L5_BR:
+ 		return LAYER5_BITRATE_HEVC;
++	case V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME:
++		return REQUEST_SYNC_FRAME;
+ 	default:
+ 		return INST_FW_CAP_MAX;
+ 	}
+@@ -305,6 +307,8 @@ static u32 iris_get_v4l2_id(enum platform_inst_fw_cap_type cap_id)
+ 		return V4L2_CID_MPEG_VIDEO_HEVC_HIER_CODING_L4_BR;
+ 	case LAYER5_BITRATE_HEVC:
+ 		return V4L2_CID_MPEG_VIDEO_HEVC_HIER_CODING_L5_BR;
++	case REQUEST_SYNC_FRAME:
++		return V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME;
+ 	default:
+ 		return 0;
+ 	}
+@@ -1513,6 +1517,24 @@ int iris_set_layer_bitrate(struct iris_inst *inst, enum platform_inst_fw_cap_typ
+ 					     &bitrate, sizeof(u32));
+ }
+ 
++int iris_set_req_sync_frame(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id)
++{
++	const struct iris_hfi_session_ops *hfi_ops = inst->hfi_session_ops;
++	u32 hfi_id = inst->fw_caps[cap_id].hfi_id;
++	u32 hfi_val = 0;
++
++	if (inst->fw_caps[PREPEND_SPSPPS_TO_IDR].value)
++		hfi_val = HFI_SYNC_FRAME_REQUEST_WITH_PREFIX_SEQ_HDR;
++	else
++		hfi_val = HFI_SYNC_FRAME_REQUEST_WITHOUT_SEQ_HDR;
++
++	return hfi_ops->session_set_property(inst, hfi_id,
++					     HFI_HOST_FLAGS_NONE,
++					     iris_get_port_info(inst, cap_id),
++					     HFI_PAYLOAD_U32_ENUM,
++					     &hfi_val, sizeof(u32));
++}
++
+ int iris_set_properties(struct iris_inst *inst, u32 plane)
+ {
+ 	const struct iris_hfi_session_ops *hfi_ops = inst->hfi_session_ops;
+diff --git a/drivers/media/platform/qcom/iris/iris_ctrls.h b/drivers/media/platform/qcom/iris/iris_ctrls.h
+index 10993b8..394af7b 100644
+--- a/drivers/media/platform/qcom/iris/iris_ctrls.h
++++ b/drivers/media/platform/qcom/iris/iris_ctrls.h
+@@ -48,6 +48,7 @@ int iris_set_layer_type(struct iris_inst *inst, enum platform_inst_fw_cap_type c
+ int iris_set_layer_count_gen1(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id);
+ int iris_set_layer_count_gen2(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id);
+ int iris_set_layer_bitrate(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id);
++int iris_set_req_sync_frame(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id);
+ int iris_set_properties(struct iris_inst *inst, u32 plane);
+ 
+ #endif
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen2.c b/drivers/media/platform/qcom/iris/iris_hfi_gen2.c
+index d519dc0..60e2eda 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2.c
+@@ -954,7 +954,17 @@ static const struct platform_inst_fw_cap inst_fw_cap_sm8550_enc[] = {
+ 		.flags = CAP_FLAG_OUTPUT_PORT | CAP_FLAG_INPUT_PORT |
+ 			CAP_FLAG_DYNAMIC_ALLOWED,
+ 		.set = iris_set_layer_bitrate,
+-	}
++	},
++	{
++		.cap_id = REQUEST_SYNC_FRAME,
++		.min = 0,
++		.max = 1,
++		.step_or_mask = 1,
++		.value = 0,
++		.hfi_id = HFI_PROP_REQUEST_SYNC_FRAME,
++		.flags = CAP_FLAG_INPUT_PORT | CAP_FLAG_DYNAMIC_ALLOWED,
++		.set = iris_set_req_sync_frame,
++	},
+ };
+ 
+ static const u32 sm8550_vdec_input_config_params_default[] = {
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen2_defines.h b/drivers/media/platform/qcom/iris/iris_hfi_gen2_defines.h
+index ba28de6..1d15edc 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2_defines.h
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2_defines.h
+@@ -91,6 +91,13 @@ enum hfi_layer_encoding_type {
+ #define HFI_PROP_BITRATE_LAYER4			0x0300013f
+ #define HFI_PROP_BITRATE_LAYER5			0x03000140
+ #define HFI_PROP_BITRATE_LAYER6			0x03000141
++
++enum hfi_syncframe_request_mode {
++	HFI_SYNC_FRAME_REQUEST_WITHOUT_SEQ_HDR		= 0x00000001,
++	HFI_SYNC_FRAME_REQUEST_WITH_PREFIX_SEQ_HDR	= 0x00000002,
++};
++
++#define HFI_PROP_REQUEST_SYNC_FRAME		0x03000145
+ #define HFI_PROP_MAX_GOP_FRAMES			0x03000146
+ #define HFI_PROP_MAX_B_FRAMES			0x03000147
+ #define HFI_PROP_QUALITY_MODE			0x03000148
+diff --git a/drivers/media/platform/qcom/iris/iris_platform_common.h b/drivers/media/platform/qcom/iris/iris_platform_common.h
+index ef9c1e4..34c7d41 100644
+--- a/drivers/media/platform/qcom/iris/iris_platform_common.h
++++ b/drivers/media/platform/qcom/iris/iris_platform_common.h
+@@ -186,6 +186,7 @@ enum platform_inst_fw_cap_type {
+ 	LAYER5_BITRATE_HEVC,
+ 	DISPLAY_DELAY_ENABLE,
+ 	DISPLAY_DELAY,
++	REQUEST_SYNC_FRAME,
+ 	INST_FW_CAP_MAX,
+ };
+ 
+-- 
+2.54.0
+
