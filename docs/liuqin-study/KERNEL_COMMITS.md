@@ -788,10 +788,40 @@ VMID 11；核心的复位和掉电要按原厂驱动的顺序来。diting 的设
 - 每次固件错误伴随一条视频核心的 SMMU 上下文错误（`SID=0x2184`）；恢复线程在出错会话退出前约每秒
   重建一次（4 秒里最多 11 条 `received system error`）。
 - 0132 没有验证（这台手机上不卸载模块）。
-- 强制关键帧：驱动没有这个控制（上游 7.3 才有）。HEVC 在 4K 的电平没有约束。
+- 强制关键帧：这一批时驱动没有这个控制（上游 7.3 才有）；0137 起有了，见第四批。HEVC 在 4K 的
+  电平没有约束。
 
 **用户态**：kit 的 7 个 FFmpeg 补丁迁到了 n9.1（`ubuntu-diting/packages/ffmpeg-diting`，
 `git am -3` 无冲突），手机上在 docker 镜像里编出静态二进制，验收七项全过
 （`ubuntu-diting/ci/FFMPEG.md`）。并入 rootfs 的方式（机主 2026-11-27 定）：二进制装进镜像的
 `/usr/local/bin/`，动态链接 Ubuntu 26.04 的库，不动归档的 ffmpeg；常见的外部库（https、libx264 等）都要，
 硬件只留 V4L2 这几路。
+
+### 第四批：编码器的强制关键帧控件（0137，2026-11-27）
+
+| 编号 | 来源 | 内容 |
+| --- | --- | --- |
+| 0137 | 上游 Wangao Wang 的 "add dynamic encoder properties" v4 的 2/2 "Add request key frame support for encoder"（2026-07-23，在 7.3 里；手工移植，只取 gen2 那一半：sm8250 的表、gen1 的包构造器和 HFI 定义不要，系列的 1/2 是 gen1 专用，也不要） | `V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME`：枚举加 `REQUEST_SYNC_FRAME`（放在 `DISPLAY_DELAY` 之后，本项目解码顺序补丁的末尾），`HFI_PROP_REQUEST_SYNC_FRAME`（0x03000145，带或不带 SPS/PPS 头两种模式），`inst_fw_cap_sm8550_enc` 表加一项（gen2 只此一张编码器表，SM8450 也用它），`iris_set_req_sync_frame()` 按 `PREPEND_SPSPPS_TO_IDR` 选模式。43 行、五个文件 |
+
+它是 VA-API 驱动给每个客户端请求的 IDR 写的那个控件（`docs/VIDEO_ENCODE.md`）；没有它，一个会话的
+第二个关键帧必败（`encoder S_CTRL: Invalid argument`）。
+
+**手机上读到的**（模块 `89c8cc05da92a3e7…`，`updates/qcom-iris.ko`，2026-11-27 14:05 重启起；
+内核镜像、配置、DTB 与第三批逐字节相同，`module-diff.py`：1699 个模块里只有它不同。日志在
+`liuqin-study/raw/vaenc-eval/phone-2026-11-27-afternoon/`，工作区）：
+
+| 项目 | 结果 |
+| --- | --- |
+| 控件 | 编码器节点（这次是 `/dev/video1`）上有 `force_key_frame` |
+| 请求关键帧（ffmpeg，H.264 High，720p，CBR 2 Mbit/s） | 每 30 帧一个：关键帧落在 0、30、…、270；2 秒和 4 秒各一个：0、60、120；按表达式每 3 秒：0、90、180、270；每一帧都请求：300 帧全是。每个 IDR 自带 SPS/PPS |
+| 上游驱动的测试 | `api-smoke`、`ffmpeg-smoke.py`（9 个用例）过；`async` H.264 20 遍、HEVC 10 遍 0 败 |
+| 解码回归 | 两个 VA-API 驱动对软解：8 位逐帧一致，qcom 驱动的 10-bit P010 一致；seek、并发、截断流：与 0137 之前相同 |
+| 内核日志 | 整个过程没有 iris 的内容；核心用完即挂起 |
+
+**上机时露出来的一个固件行为**：请求的关键帧偶尔晚一帧。五个会话、约 4900 次请求里，固件把请求
+的那一帧编成了普通 P 帧，下一帧才是带 SPS/PPS 的 IDR，之后又逐字节相同。不带我们补丁的上游驱动
+也有，逐帧等结果的会话里也有，所以不是用户态补丁、也不是排队深度引起的。内核这边属性包和
+缓冲包走同一条命令队列、按序入队，写失败会报 `queue full`（没有出现），内核不等固件确认属性。
+上游 `async` 的“逐帧等结果与排 8 帧的码流必须相同”因此 80 遍败 3 遍。驱动里在请求之后、送缓冲
+之前等 1 毫秒（`qcom-va-driver` 的补丁 0003）：500 轮、1 万次请求没有一次（对照组 189 轮 3 次）。
+这是用户态的缓解；固件内部发生了什么没有查清。

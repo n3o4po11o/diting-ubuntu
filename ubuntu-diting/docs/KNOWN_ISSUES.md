@@ -212,20 +212,19 @@ kernel log had nothing new through all of it. Limits:
   with nothing in the kernel log. Its encoder wrapper gives up at the
   drain while packets still hold the capture buffers; the kit's patch 0003
   (in `packages/ffmpeg-diting`) is for that - 0 of 80 there.
-- No forced keyframes: the driver offers no control for it (upstream 7.3
-  has one). A backport of the gen2 half of that upstream patch is written and
-  built: on 2026-11-27 only `qcom-iris.ko` differed from the package on the
-  phone (`scripts/module-diff.py`). It is not in this tree until it has run
-  on the phone, and it is not on the phone: the module is not unloaded and
-  reloaded here, so trying it takes a reboot. Until then the second key
-  frame of a VA-API session fails (below).
+- Forced keyframes: `V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME` since 0137 (the
+  gen2 half of the upstream patch; on the phone since the reboot at 14:05 on
+  2026-11-27, as the module alone in `updates/`). An IDR lands where it is
+  asked for and brings its own SPS and PPS: by ffmpeg every 30 frames, at
+  named times, by an expression, and on every frame of a stream. What it took
+  to make that reliable is in the VA-API driver, below (patch 0003).
 - The HEVC level is not constrained by the driver (H.264's is, by 0128).
 
 Hardware encoding **through VA-API**: the `qcom-va-driver` package (2026-11-27).
-Radxa's reference implementation (MIT) at `ee8622c` with two patches of ours
+Radxa's reference implementation (MIT) at `ee8622c` with three patches of ours
 (`packages/qcom-va-driver/patches`), built by `make qcom-va-driver`
 (`docs/VIDEO_ENCODE.md`, which was the evaluation and is now the record).
-Installed on the phone by hand as `1.1.1+gitee8622c-0diting3`; not in an
+Installed on the phone by hand as `1.1.1+gitee8622c-0diting4`; not in an
 image. It is `qcom_drv_video.so` and nothing else, so it stands next to
 `libva-v4l2-stateful`, which keeps the `msm` and `v4l2` names: a program picks
 it with `LIBVA_DRIVER_NAME=qcom`, and the browsers do not use it yet. Read on
@@ -250,9 +249,23 @@ the phone (the tables are in `docs/VIDEO_ENCODE.md`, section 12):
   which upstream refused ("changing encoder settings requires a new
   context"): the pipeline is drained, then the controls are set.
   `qcom-va-driver-tests` has `rate-change` for it.
-- The upstream tests (`api-smoke`, `async`) fail at the second key frame
-  until 0137 is on the phone: `encoder S_CTRL: Invalid argument`. With one
-  key frame a session encodes as long as it is asked to.
+- The upstream tests pass as they are, with 0137 on the phone and these
+  patches: `api-smoke`, `ffmpeg-smoke.py` (9 cases), and `async`, 20 runs in
+  H.264 and 10 in HEVC without a failure. Before 0137 each stopped at the
+  second key frame (`encoder S_CTRL: Invalid argument`).
+- **A requested key frame came one frame late, now and then** (2026-11-27).
+  In five sessions of about 4900 requests the firmware encoded the requested
+  frame as an ordinary P picture and made the next one the IDR, with SPS and
+  PPS; the stream then differed from another run of the same frames at that
+  key frame and the three after it, and nowhere else. It happened with the
+  driver as upstream ships it too, and in sessions that wait for every frame,
+  so neither our patches nor the queue depth are the cause. It is how `async`
+  came to fail in three of 80 runs. The kernel writes the property and the
+  buffer to one command queue, in order, and does not wait for the firmware
+  to take a property, so the driver pauses a millisecond between the request
+  and the frame (patch 0003). Since: 500 rounds of `async-dump` and the 30
+  `async` runs above, 13,000 requests, without one - at the old rate 13 were
+  due. A pause is a mitigation, not a proof of what goes on in the firmware.
 - Decoding through it, read with ffmpeg against a software decode: H.264,
   HEVC and VP9 at 8 bit frame for frame identical, 720p to 4K, with B frames,
   on a seek, three seeks in one process, and two decoders next to an encoder.
@@ -264,15 +277,23 @@ the phone (the tables are in `docs/VIDEO_ENCODE.md`, section 12):
   libstdc++ 6.0.35), and with
   `--enable-features=AcceleratedVideoEncoder` WebCodecs picks the hardware
   encoder by default (`hardwareAcceleration: "no-preference"`): the GPU
-  process logs "Initializing VAVEA" and goes to `kEncoding`. But not one
-  frame has been encoded in hardware by it yet. Frames that come from
-  memory - a canvas, an I420 buffer - have to be put into a GPU buffer first,
-  and Chromium cannot create that here: `VideoEncodeAcceleratorAdapter`
-  logs "Unable to create a mappable shared image" (a `VEA_READ_CAMERA_AND_CPU_READ_WRITE`
-  buffer) and falls back to OpenH264, which is what the page's numbers then
-  are. Frames that are GPU buffers already - a video the decoder produced -
-  are passed through untouched; that path is not tried yet (it needs the
-  desktop session). Headless Chromium does not touch VA-API at all.
+  process logs "Initializing VAVEA" and goes to `kEncoding`. **It cannot hand
+  it a frame from memory, and will not on this GPU as things are.** A frame
+  that comes from memory - a canvas, an I420 buffer, a camera - has to go
+  into an NV12 GPU buffer first, and Chromium has that buffer made through
+  GBM: under Wayland only for a format GBM reports for scanout, and on every
+  Linux backend only as a buffer GBM or the client provides. GBM on this
+  phone cannot make NV12 at all: `gbm-probe` in `liuqin-study/scripts` of the
+  workspace asks the libgbm of the host (Mesa 26.0.8) and of the snap
+  (26.0.4), and both say no to scanout, to linear, and to linear with
+  rendering, while they make and map an XRGB8888 buffer. So
+  `VideoEncodeAcceleratorAdapter` logs "Unable to create a mappable shared
+  image" and falls back to OpenH264, which is what the page's numbers then
+  are. Chromium's VA encoder does have a way with frames in shared memory
+  (`CreateSurfacesForShmemEncoding`) that needs no GBM, but the adapter picks
+  GPU buffers for it on Linux and has no switch for it. Out of this tree's
+  hands: it takes NV12 from GBM in Mesa's msm driver, or a change in
+  Chromium. Headless Chromium does not touch VA-API at all.
 - Initializing the driver opens and closes every `/dev/video*` node, five
   times in all (`/dev/video-dec0` is matched by the glob as well as
   `/dev/video4`). Twice that day, each time just after `vainfo` had run

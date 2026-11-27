@@ -430,17 +430,19 @@ QP 的写法：
 
 ## 12 实施记录（2026-11-27）
 
-这一天做完了 S0（不动内核的验证），并且做了两件评估里没有的事：上游驱动带着两个缺陷，
-在这颗固件上一个是码控完全失效、一个是视频通话用不了，都已经在 `packages/qcom-va-driver/patches`
-里修掉并在手机上验证。S1 的内核补丁编出来了，还没上机。**Chromium 里还没有编出过一帧硬件帧**：
-卡在帧的递交上（12.2 第 5 条），不是驱动的问题。
+这一天做完了 S0（不动内核的验证）和 S1（内核的关键帧控件，0137：已上机、已提交），并且做了
+评估里没有的事：上游驱动带着三个缺陷，在这颗固件上一个是码控完全失效、一个是视频通话用不了、
+一个是请求的关键帧偶尔晚一帧，都已经在 `packages/qcom-va-driver/patches` 里修掉并在手机上验证。
+**Chromium 在这台手机上用不上它**：不是驱动的问题，是 GBM 分配不了 NV12（12.7）。上午的记录在
+12.1–12.5，下午 0137 上机之后的两件事在 12.7，读的时候以它为准。
 
 ### 12.1 仓库里有什么
 
 | 位置 | 内容 |
 | --- | --- |
-| `ubuntu-diting/packages/qcom-va-driver/` | `debian/`（我们自己写的，不用上游的：关掉 GPU 拷贝、CDSP、Vulkan，不带 `v4l2` 名字）和 `patches/`（0001、0002，见 12.3） |
+| `ubuntu-diting/packages/qcom-va-driver/` | `debian/`（我们自己写的，不用上游的：关掉 GPU 拷贝、CDSP、Vulkan，不带 `v4l2` 名字）和 `patches/`（0001、0002、0003，见 12.3 和 12.7） |
 | `ubuntu-diting/packages/qcom-va-driver/patches/0002` | 还带一个测试程序 `tests/encoder/rate-change`：一个会话、一个关键帧，码率改两次、帧率改一次 |
+| `ubuntu-diting/packages/qcom-va-driver/patches/0003` | 还带 `tests/encoder/async-dump`：同一串帧四种编法，码流必须逐字节相同（12.7） |
 | `scripts/build-qcom-va-driver.sh`、`make qcom-va-driver` | 照 `libva-v4l2-stateful` 的做法：`git archive` 上游、放上补丁、在 arm64 chroot 里 `dpkg-buildpackage` |
 | `config/diting.conf` | `QCOM_VA_DRIVER_URL`、`QCOM_VA_DRIVER_COMMIT`（`ee8622c`）；`fetch-sources.sh` 认识这个名字，`ci/tests.sh` 的计数跟着改成 17 |
 | 两个 deb | `qcom-va-driver`（只有 `/usr/lib/aarch64-linux-gnu/dri/qcom_drv_video.so`）、`qcom-va-driver-tests`（上游的硬件测试加 `rate-change`，在 `/usr/libexec/qcom-va-driver/tests/`） |
@@ -525,7 +527,8 @@ debootstrap 在 qemu 下约 6 分钟，一次编译约 6 分钟。
      image`，一帧都没送到编码器，回退到 OpenH264。Chromium 158 在 Linux 上固定按 GPU 缓冲送帧
      （`StorageType::kGpuMemoryBuffer`）：来源帧已经是 GPU 共享图像就直通；来自内存的帧（2D
      画布、I420 字节）要先装进一个 CPU 可写的 GPU 缓冲（`VEA_READ_CAMERA_AND_CPU_READ_WRITE`），
-     这一步在这台手机的 snap 里建不出来。原因没查。无头模式的 Chromium 根本不碰 VA-API。
+     这一步在这台手机的 snap 里做不成。原因下午查清了：GBM 分配不了 NV12（12.7）。无头模式的
+     Chromium 根本不碰 VA-API。
    - 顺带：测试用的那段视频是 Chromium 经 qcom 驱动**硬解**出来的（240 帧），播放对不对没看。
 
 另外记一条：驱动初始化时把 `/dev/video*` 全开一遍再关，共 5 次。那天有两次，都是紧跟在一次
@@ -534,7 +537,7 @@ debootstrap 在 qemu 下约 6 分钟，一次编译约 6 分钟。
 进程、每一次真正的编码会话之后，都是干净地挂起。每次都自己恢复，没有再深究
 （KNOWN_ISSUES）。
 
-### 12.3 上游驱动的两个缺陷
+### 12.3 上游驱动的缺陷（上午找到的两个）
 
 **0001：时间戳让码控失效。** `Encoder::encode()` 把 V4L2 时间戳当回配令牌：第 n 帧的戳是 n 微秒。
 固件的码控按输入时间戳算每帧的预算，把它当成每秒一百万帧，于是顶到允许的最大 QP。二分是在
@@ -548,7 +551,8 @@ debootstrap 在 qemu 下约 6 分钟，一次编译约 6 分钟。
 流里的时序信息还是会话开始时的那个，码率预算跟着时间戳走。QP 上下限、level、熵编码、去块滤波
 仍然要新上下文（内核在流中拒绝 QP 上下限的控件）。
 
-这两个补丁值得报给上游（`radxa-pkg/qcom-va-driver`），还没报。
+第三个缺陷（0003）是下午 0137 上机之后才露出来的，见 12.7。三个补丁都值得报给上游
+（`radxa-pkg/qcom-va-driver`），还没报。
 
 ### 12.4 对评估的更正
 
@@ -556,12 +560,11 @@ debootstrap 在 qemu 下约 6 分钟，一次编译约 6 分钟。
 - 3.3 的表和 6.1：能力表只有一张 `inst_fw_cap_sm8550_enc`，gen2 平台共用，SM8450 也用它。回移
   补丁（编为 0137）43 行，和 0127–0129、0134 没有冲突。已编出：`module-diff.py` 比对新旧两个包，
   1699 个模块里只有 `qcom-iris.ko` 不同，vmlinuz、config、System.map 一样，所以上机只要把模块
-  放进 `updates/` 再重启，不用刷 boot。**还没上机，所以按仓库的规矩它还不在 git 里**（在写它的
-  那台机器的工作区里）；上机验证过了才作为 0137 提交。
-- 4 的第 13 行（输入帧 I420/NV12，“性能待测”）：在这台手机上，来自内存的帧在 Chromium 里过不去
-  （12.2 第 6 条）。GPU 来源帧那条路没试。
-- 5.1 方案 A 的“不用移植代码；能跟上游”：上游在这颗固件上带着两个缺陷，“跟上游”意味着每次
-  重新带上 0001、0002，或者把它们推上去。
+  放进 `updates/` 再重启，不用刷 boot。下午上机、验证、提交（`a21386e`），见 12.7。
+- 4 的第 13 行（输入帧 I420/NV12，“性能待测”）：这台手机上 Chromium 根本递不了帧，GPU 来源帧
+  也一样，因为递给编码器的帧必须是 GBM 做的 NV12 缓冲（12.7）。
+- 5.1 方案 A 的“不用移植代码；能跟上游”：上游在这颗固件上带着三个缺陷，“跟上游”意味着每次
+  重新带上 0001–0003，或者把它们推上去。
 - 6.3：chroot 现在在构建服务器上（12.1）；snap 里能加载；`diting-chromium-vaapi` 和
   `~/.chromium-browser.init` 没动。
 - 9.3 的码率数字是修好之后的：CBR 贴着目标，VBR 要 4 得 4.1；真实会议画面没测。
@@ -571,12 +574,12 @@ debootstrap 在 qemu 下约 6 分钟，一次编译约 6 分钟。
 | # | 问题 | 答复 |
 | --- | --- | --- |
 | 1 | 能不能编译、加载、开会话 | 能（12.2 第 1、2 条） |
-| 2 | 补丁加到哪张表、有没有冲突 | `inst_fw_cap_sm8550_enc`；无冲突；已编出，未上机 |
+| 2 | 补丁加到哪张表、有没有冲突 | `inst_fw_cap_sm8550_enc`；无冲突；已上机、已提交（12.7） |
 | 3 | 流中改码率固件是否调整 | 调整：`rate-change` 的 3 Mbit/s 那段实得 2970 |
 | 4 | 流中 `S_PARM` 是否允许、是否生效 | 内核允许，但不发给固件；预算跟着时间戳走，生效（15 fps 那段要 2 Mbit/s 得 1890） |
-| 5 | Chromium 给 WebCodecs 选不选硬件 | 选（默认就是）；WebRTC 没测 |
-| 6 | 第一帧延迟、关键帧延迟 | 没测（Chromium 里还没有硬件帧） |
-| 7 | 编码器输入缓冲的步长和存储高度 | 720p：1280、736；Chromium 按 GPU 缓冲送帧，CPU 帧要先转进 GPU 缓冲 |
+| 5 | Chromium 给 WebCodecs 选不选硬件 | 选（默认就是），但递不了帧（12.7）；WebRTC 没测 |
+| 6 | 第一帧延迟、关键帧延迟 | 没测（Chromium 里没有硬件帧） |
+| 7 | 编码器输入缓冲的步长和存储高度 | 720p：1280、736；Chromium 按 GPU 缓冲送帧，而那个缓冲在这台手机上做不出来 |
 | 8 | 拷进 snap 能不能加载 | 能 |
 | 9 | 0002 需不需要 | 没碰到；ffmpeg 一层没要过 32 个以上，浏览器没测 |
 | 10 | 对端能不能解这路流 | 没测 |
@@ -584,15 +587,74 @@ debootstrap 在 qemu 下约 6 分钟，一次编译约 6 分钟。
 
 ### 12.6 还没做的
 
-1. **S1 上机**：0137 的 `qcom-iris.ko` 放进 `/lib/modules/$(uname -r)/updates/`、`depmod -a`、重启；
-   然后 `v4l2-ctl --list-ctrls` 里出现 `force_key_frame`，上游的 `ffmpeg-smoke.py`、`api-smoke`、
-   `async` 原样重跑（现在它们都在第二个关键帧上失败），流中请求 IDR 之后下一帧确实是 IDR。
-   这颗模块不卸载重载，所以必须重启。
-2. **Chromium**：需要桌面会话。GPU 来源帧（硬解出的视频 → `VideoFrame` → 编码器直通）先试；
-   CPU 来源帧要先查清 `mappable shared image` 为什么建不出来（带 `--vmodule=shared_image_factory=3,...`
-   的日志）。测试页和脚本在工作区 `liuqin-study/scripts/qva-webcodecs-test.html`、
-   `phone-qva-webcodecs.sh`，不在仓库里。
-3. **方案 A 还是 B**：ffmpeg 一层的解码回归通过；还差浏览器播放的回归。通过就整体换驱动
-   （`msm`、`v4l2` 两个名字挪过去，10-bit 解码顺带得到）。
-4. 真实会议画面的码控、首帧和关键帧延迟、对端解码器、CPU 和 GPU 占用。
-5. 两个补丁报给上游。
+1. **方案 A 还是 B**：它现在只是解码的问题（换不换驱动去解码）。编码这一半浏览器在这台手机上
+   用不上，跟驱动无关（12.7）。ffmpeg 一层的解码回归通过；还差浏览器播放的回归。
+2. **浏览器里用上硬件编码**：要上游动手，两条路任选其一（12.7）。不在仓库里。
+3. 真实会议画面的码控、首帧和关键帧的延迟、对端解码器：只对用得上 VA-API 编码器的客户端有意义
+   （比如装了 `gstreamer1.0-va` 的 GStreamer 应用）。
+4. 三个补丁报给上游。
+5. `qcom-va-driver` 进不进镜像：现在只是手机上手工装的。
+
+### 12.7 下午：0137 上机之后
+
+**上机**。带 0137 的模块 14:00 放进 `/lib/modules/7.2.10-diting/updates/`（手工放的；我的脚本用
+`$HOME` 找模块，以 root 运行时找不到，已改成在脚本所在的目录里找），14:05 重启之后 `modinfo -n`
+指向它，编码器节点（这次是 `/dev/video1`）上有了 `force_key_frame`。
+
+**结果**（手机上是最终的包 `1.1.1+gitee8622c-0diting4`，三个补丁；脚本
+`phone-s1-verify.sh`、`phone-qva-final2.sh`，日志在手机 `~/qva/` 和工作区
+`liuqin-study/raw/vaenc-eval/`）：
+
+| 请求关键帧（ffmpeg，H.264 High，720p，300 帧，CBR 2 Mbit/s） | 关键帧落在第几帧 | 带 SPS/PPS 的 IDR |
+| --- | --- | --- |
+| 只要第一个 | 0 | 1 |
+| 每 30 帧 | 0、30、…、270 | 10 |
+| 2 秒和 4 秒 | 0、60、120 | 3 |
+| 每 3 秒（按表达式） | 0、90、180、270 | 4 |
+| 每一帧 | 0 到 299 | 300 |
+
+上游的测试原样跑：`api-smoke` 过；`ffmpeg-smoke.py` 9 个用例过（SSIM 0.994–0.998）；`async`
+H.264 跑 20 遍、HEVC 跑 10 遍，没有一次失败。`rate-change`、码控对照、解码回归（两个驱动）、
+并发、seek、截断流、74 条流的矩阵：和上午一个数不差。内核日志里没有 iris 的内容。
+
+**第三个缺陷：请求的关键帧偶尔晚一帧（补丁 0003）。** 重启后第一次验证时 `async` 的 H.264
+倒在“逐帧等结果的码流和排 8 帧的码流必须逐字节相同”上。抓下来看（`async-dump`，工作区
+`liuqin-study/scripts/`）：两个**都是逐帧等结果**的会话，第 68 帧请求的 IDR 没出，成了一帧普通
+的 P，第 69 帧才是带 SPS/PPS 的 IDR，之后两个流又逐字节相同。不带补丁的第一版驱动同样抓到
+一次（第 17 帧请求，第 18 帧出）。所以它既不是我们的补丁引起的，也和排队深度无关。
+
+- 比率：不等待时 5 次不同的会话，共约 4900 次请求（打补丁的 45 轮 1 次，不打补丁的 10 轮
+  1 次，同一份实验二进制的对照组 189 轮 3 次），约千分之一；上游的 `async` 80 遍里因此败 3 遍。
+- 内核侧查过：属性包和缓冲包走同一条命令队列、按序入队，写失败会打 `queue full`（没有），内核
+  也不等固件确认属性。所以能做的只是在驱动里等一下。
+- 试验：实验版驱动里请求之后、送缓冲之前等 1 毫秒（`QVA_KF_DELAY_US=1000`），500 轮
+  （1 万次请求）0 次不同；同一份二进制把等待关掉，189 轮 3 次。
+- 修法：0003，等 1 毫秒，并把 `async-dump` 收进包的测试里。之后累计 1.3 万次请求没有一次
+  （按原来的比率应有 13 次）。这是缓解，不是对固件内部发生了什么的证明。
+- 对使用的意义：即便晚一帧，流仍然是可解的（下一帧就是 IDR），所以它从来没让画面坏过，
+  让的是“同一条流逐字节可重复”这种要求。内核给码流缓冲打着 `V4L2_BUF_FLAG_KEYFRAME`，
+  以后要查固件有没有照做，可以看它。
+
+**Chromium 的结论：这台手机上 GBM 分配不了 NV12。** 读 Chromium 158 的源码找到链路：来自内存
+的帧要先装进一个 CPU 可写的 NV12 GPU 缓冲，这个缓冲由共享图像后端经 GBM 做；Wayland 下它只认
+GBM 报“能扫描输出”的格式（`ui/gfx/linux/gbm_wrapper.cc` 的 `GetSupportedGbmFlags`，不用
+minigbm 的那一支），Vulkan 和 Ozone 后端又都只接受 GBM 或客户端提供的缓冲。然后在手机上直接问
+GBM（`gbm-probe`，工作区 `liuqin-study/scripts/`，对 1280×736 的 NV12 建缓冲并映射写入）：
+
+| 格式和用途 | 主机的 Mesa 26.0.8 | snap 里的 Mesa 26.0.4 |
+| --- | --- | --- |
+| NV12，SCANOUT | 不支持，建不出 | 不支持，建不出 |
+| NV12，LINEAR | 不支持，建不出 | 不支持，建不出 |
+| NV12，LINEAR + RENDERING | 不支持，建不出 | 不支持，建不出 |
+| XRGB8888，SCANOUT（对照） | 支持，建出并映射写入 | 支持，建出并映射写入 |
+
+所以 `Unable to create a mappable shared image`，然后回退软编；换成 X11 也一样（那条路要的是
+LINEAR）。Chromium 的 VA 编码器自己有一条不经过 GBM 的路（`CreateSurfacesForShmemEncoding`：
+驱动分配 NV12 surface，CPU 拷进去，上游的 `api-smoke` 走的就是这种上传，能过），但适配层在
+Linux 上固定选 GPU 缓冲，没有开关。要浏览器在这台手机上用硬件编码，得上游：Mesa 的 msm 驱动
+支持经 GBM 分配 NV12（Wayland 下还得能扫描输出），或者 Chromium 的适配层在 GBM 做不出时改用
+共享内存输入。
+
+**这对 0 节的路线意味着什么**：评估时把“浏览器里视频通话用上硬件编码”当作目标，S0 的结果
+回答了它——驱动、内核、固件这一半都通了，卡在 Chromium 和 Mesa 之间。VA-API 编码器本身在这台
+手机上是可用的，只是没有现成的浏览器客户端。
