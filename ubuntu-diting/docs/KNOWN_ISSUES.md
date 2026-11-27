@@ -294,6 +294,24 @@ the phone (the tables are in `docs/VIDEO_ENCODE.md`, section 12):
   GPU buffers for it on Linux and has no switch for it. Out of this tree's
   hands: it takes NV12 from GBM in Mesa's msm driver, or a change in
   Chromium. Headless Chromium does not touch VA-API at all.
+- **Frames in I420 cannot be uploaded the way ffmpeg does it** (2026-11-27).
+  With `hwupload` of an I420 frame, and with every client that puts I420
+  frames into VA surfaces through `av_hwframe_transfer_data()`, libavutil
+  has the driver make the surfaces with their pixel format set to I420. The
+  driver only makes NV12 ones: "surface pixel format does not match RT
+  format", "Failed to create surface: 14". RustDesk is such a client: on
+  Linux its encoder is ffmpeg's `h264_vaapi` fed with I420 frames, so with
+  this driver it could not open the encoder and would stay in software. It
+  is not installed on the phone; this comes from reading
+  `rustdesk-org/hwcodec` and encoding with ffmpeg by its settings
+  (`phone-qva-rustdesk.sh` in `liuqin-study/scripts` of the workspace). With
+  the frames turned into NV12 first (`-vf format=nv12,hwupload`) and nothing
+  else changed, `testsrc2` encodes at 145-159 fps at 720p, 107-122 at 1080p
+  and 84 at 2340x1080, 3-25 per cent over the bit rate asked for (ffmpeg's
+  default rate control, which is what RustDesk uses). What the driver lacks
+  is an I420 surface, turned into NV12 on the way to the encoder. Without
+  `LIBVA_DRIVER_NAME=qcom` in its environment RustDesk gets the default
+  driver, where ffmpeg finds no encoding entrypoint at all.
 - Initializing the driver opens and closes every `/dev/video*` node, five
   times in all (`/dev/video-dec0` is matched by the glob as well as
   `/dev/video4`). Twice that day, each time just after `vainfo` had run

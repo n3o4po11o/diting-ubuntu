@@ -590,10 +590,12 @@ debootstrap 在 qemu 下约 6 分钟，一次编译约 6 分钟。
 1. **方案 A 还是 B**：它现在只是解码的问题（换不换驱动去解码）。编码这一半浏览器在这台手机上
    用不上，跟驱动无关（12.7）。ffmpeg 一层的解码回归通过；还差浏览器播放的回归。
 2. **浏览器里用上硬件编码**：要上游动手，两条路任选其一（12.7）。不在仓库里。
-3. 真实会议画面的码控、首帧和关键帧的延迟、对端解码器：只对用得上 VA-API 编码器的客户端有意义
+3. **RustDesk 这类用 I420 上传的客户端**：驱动补一个 I420 的 surface，送编码器前转成 NV12
+   （12.7）。写了之后装上 RustDesk 实测。
+4. 真实会议画面的码控、首帧和关键帧的延迟、对端解码器：只对用得上 VA-API 编码器的客户端有意义
    （比如装了 `gstreamer1.0-va` 的 GStreamer 应用）。
-4. 三个补丁报给上游。
-5. `qcom-va-driver` 进不进镜像：现在只是手机上手工装的。
+5. 三个补丁报给上游。
+6. `qcom-va-driver` 进不进镜像：现在只是手机上手工装的。
 
 ### 12.7 下午：0137 上机之后
 
@@ -654,6 +656,32 @@ LINEAR）。Chromium 的 VA 编码器自己有一条不经过 GBM 的路（`Crea
 Linux 上固定选 GPU 缓冲，没有开关。要浏览器在这台手机上用硬件编码，得上游：Mesa 的 msm 驱动
 支持经 GBM 分配 NV12（Wayland 下还得能扫描输出），或者 Chromium 的适配层在 GBM 做不出时改用
 共享内存输入。
+
+**另一个客户端：RustDesk，卡在 I420 上传。** 机主问能不能用 RustDesk 测编码。手机上没装它；
+读的是它的 `hwcodec`（`rustdesk-org/hwcodec`）：Linux 上的硬件编码是 ffmpeg 的 `h264_vaapi`，
+设备用默认的渲染节点，帧是 I420，经 `av_hwframe_transfer_data()` 送进 VA surface；
+`async_depth=1`，`idr_interval` 和 `gop_size` 最大，低延迟，码控用 ffmpeg 的默认模式加码率，运行中
+改 `bit_rate`。不装它也能验证这条路：用 ffmpeg 8.0.1 照这些参数编 `testsrc2`
+（`phone-qva-rustdesk.sh`，工作区 `liuqin-study/scripts/`，输出在
+`raw/vaenc-eval/rustdesk-2026-11-27/`）。
+
+| | 驱动 | 上传 | 结果 |
+| --- | --- | --- | --- |
+| A | 默认（`msm`） | I420 | surface 建出来了，写不进去（`vaPutImage` 没实现）；然后 `No usable encoding entrypoint` |
+| B | qcom | I420 | 建不出 surface：`surface pixel format does not match RT format`。libavutil 给 I420 帧建 surface 时把像素格式设成 I420，上游驱动只会建 NV12 的 |
+| C | qcom | 先 `format=nv12` 再 `hwupload` | 能编，见下表 |
+
+C 的数（其余参数和 RustDesk 一样，300 帧，两次运行）：
+
+| 尺寸 | 帧率 | 实测码率 | 要的码率 |
+| --- | --- | --- | --- |
+| 1280×720 | 145、159 帧/秒 | 4127 kbit/s | 4000 |
+| 1920×1080 | 107、122 帧/秒 | 7481 kbit/s | 6000 |
+| 2340×1080（屏幕） | 84、84 帧/秒 | 9898 kbit/s | 8000 |
+
+所以 RustDesk 配现在的驱动会留在软编。要它能用，三件事：驱动支持 I420 的 surface，送编码器之前
+转成 NV12（第四个补丁，还没写）；RustDesk 的进程里有 `LIBVA_DRIVER_NAME=qcom`；手机上装 RustDesk。
+RustDesk 在这台手机上能不能抓到屏幕（Wayland 下要经 portal）没试过。
 
 **这对 0 节的路线意味着什么**：评估时把“浏览器里视频通话用上硬件编码”当作目标，S0 的结果
 回答了它——驱动、内核、固件这一半都通了，卡在 Chromium 和 Mesa 之间。VA-API 编码器本身在这台
