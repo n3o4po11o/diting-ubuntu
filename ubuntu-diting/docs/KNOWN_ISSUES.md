@@ -377,6 +377,49 @@ Which driver a browser decodes with, since 2026-11-28:
   `--enable-wayland-ime` is not needed: this version enables the Wayland
   input method by default (`IsImeEnabled()` in
   `ui/ozone/platform/wayland/host/wayland_input_method_context.cc`).
+  **YouTube, 4K60 VP9** (Big Buck Bunny, quality forced to 2160p60, read
+  through DevTools' media domain): `kVideoDecoderName
+  VaapiVideoDecoder`, `kIsPlatformVideoDecoder true`, vp9 profile0,
+  3840x2160; 1,445 frames in 25 s, 60 a second, 2 dropped. The low
+  levels it starts with came as AV1, which this SoC has no decoder for
+  and `Dav1dVideoDecoder` takes in software - the usual case for a
+  phone-sized window, where YouTube never asks for 2160p.
+- **A video on YouTube taking long to start was the owner's network, not
+  the browser or the driver** (2026-11-28). The Wi-Fi connection hands
+  out 223.5.5.5 and 223.6.6.6, and for `*.googlevideo.com` their answers
+  are a lottery: the same name answered `69.63.181.12`,
+  `199.59.148.147`, `104.23.124.189`, `128.242.240.125` in one lookup
+  and a Google address in the next. In Chromium's own timing the video
+  chunks split accordingly: those that reached a Google address fetched
+  50.9 MB in 4.4 s and 31.5 MB in 2.7 s; those that reached a bogus one
+  took 10.3-11 s for 0 bytes, and the player waits for them before it
+  tries another node. Without a browser, `https://<node>/generate_204`
+  to eight cache nodes: the four that resolved to Google addresses
+  answered in 0.09-1.0 s, the four that resolved to bogus ones failed
+  (5.4 s timeout, or TLS reset); the same four forced to the address
+  Google's DoH gives answered in 0.13-0.9 s. `www.youtube.com` itself
+  resolved to Google every time, which is why the page opens and the
+  video does not. Google's DoH is reachable from this network by name
+  and by address (`https://dns.google/dns-query`,
+  `https://8.8.8.8/dns-query`, five of five each). Not changed: the fix
+  belongs in the router's DNS or in Chromium's "Use secure DNS"
+  setting, and the owner has not said which.
+- **PCIe correctable errors from the Wi-Fi chip under load are not the
+  problem** (2026-11-28, checked after the owner saw
+  `ath11k_pci 0000:01:00.0: PCIe Bus Error: severity=Correctable, type=Data
+  Link Layer, (Transmitter ID) ... [12] Timeout` while the 4K test ran).
+  They do follow heavy receiving: 8 lines in the 40 s in which the phone
+  downloaded 80 MB of video, and 2 lines during 150 MB pushed to it over
+  the LAN, none during 100 MB sent. But they are correctable - no
+  uncorrected error, no ath11k reload or reset, no Wi-Fi disconnect in
+  five hours of uptime, about 21 lines in nine bursts, seven of them
+  during ordinary use - and the link keeps its speed while they happen:
+  36 MB/s received, 22.6 MB/s sent over the LAN, 11.5 MB/s for the
+  video chunks. Different from the 80-90 per cent transmit failures after
+  ath11k reloads (above): those were after reloads, there were none.
+  (`[drm:dpu_crtc_get_vblank_counter] *ERROR* no encoder found for crtc 0`
+  in the same log is the display going on and off, twelve times since
+  boot; it has nothing to do with the network.)
 - **The first three launches of the deb from the desktop crashed**
   (2026-11-28, 01:21-01:23); later ones from the same icon ran (01:40,
   01:51). Each died about 1.3 s after start. The three dumps Chromium kept
