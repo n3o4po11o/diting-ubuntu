@@ -1,3 +1,13 @@
+qcom-va-driver (1.1.1+gitee8622c-0diting5) resolute; urgency=medium
+
+  * patches/0004: surfaces in I420 on the encoder, the format FFmpeg uploads
+    frames in (RustDesk and every client built on libavutil with it). They
+    were refused; now the client writes the three planes straight into the
+    surface and the encoder interleaves the chroma on the way to the
+    hardware. tests/encoder/i420-surface is the test for it.
+
+ -- ubuntu-diting local build <ubuntu-diting@localhost>  Fri, 27 Nov 2026 14:18:30 +0000
+
 qcom-va-driver (1.1.1+gitee8622c-0diting4) resolute; urgency=medium
 
   * patches/0003: a millisecond between a key frame request and the frame.

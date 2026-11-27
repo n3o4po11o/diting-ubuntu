@@ -1,0 +1,738 @@
+From 2fa2abced5fa893fa6a09d93cffdddc6b6d52adf Mon Sep 17 00:00:00 2001
+From: f <f@f>
+Date: Fri, 27 Nov 2026 22:17:38 +0800
+Subject: [PATCH] surfaces: take I420 on the encoder, the format FFmpeg uploads
+ in
+
+FFmpeg, and with it RustDesk and every other client built on libavutil,
+uploads a frame from memory by having the driver make surfaces with their
+pixel format set to I420 and writing the three planes straight into them
+(av_hwframe_transfer_data(), which maps the surface with vaDeriveImage()).
+The driver made NV12 surfaces only and refused those: "surface pixel
+format does not match RT format". The way it did take, an I420 image put
+onto an NV12 surface with vaPutImage(), is not what these clients use.
+
+So with this driver RustDesk could not have opened its encoder. Run by
+ffmpeg 8.0.1 with the settings RustDesk gives h264_vaapi: refused. With
+the frames turned into NV12 first, and nothing else changed, the same
+settings encode testsrc2 at 145-159 fps at 720p, 107-122 at 1080p and 84
+at 2340x1080.
+
+An I420 surface is the allocation an NV12 surface always had, read as
+three planes: U after the luma plane, V after U, each with half the pitch
+and half the rows. vaDeriveImage() gives an image in three planes, so the
+client writes in place and converts nothing. vaGetImage() and vaPutImage()
+take I420 and NV12 images on either side of an I420 surface. The encoder
+interleaves the chroma into the NV12 input it hands the hardware, in
+copy_surface(), in the pass in which it copied the frame anyway. I420 is
+offered for encoder configs only: decoders and the video processor still
+take NV12 and P010, and an I420 surface cannot be exported.
+
+tests/encoder/i420-surface.cpp holds the encoder path against the way that
+has always worked: the same 96 frames put onto NV12 with vaPutImage() and
+written straight into I420 must be one bitstream. And the image paths
+must bring every sample back where it was put, U and V not swapped.
+---
+ src/backend.cpp                |  88 +++++++-
+ src/encoder.cpp                |  14 +-
+ src/internal.hpp               |   8 +
+ src/surface-copy.cpp           |  34 ++-
+ tests/encoder/i420-surface.cpp | 378 +++++++++++++++++++++++++++++++++
+ tests/encoder/meson.build      |   8 +
+ 6 files changed, 515 insertions(+), 15 deletions(-)
+ create mode 100644 tests/encoder/i420-surface.cpp
+
+diff --git a/src/backend.cpp b/src/backend.cpp
+index 430f085..cd62680 100644
+--- a/src/backend.cpp
++++ b/src/backend.cpp
+@@ -377,7 +377,7 @@ API(
+     auto config = lookup(d.configs, id, VA_STATUS_ERROR_INVALID_CONFIG);
+     auto profile = config.profile;
+     check(count, "null surface attribute count", VA_STATUS_ERROR_INVALID_PARAMETER);
+-    VASurfaceAttrib a[9]{};
++    VASurfaceAttrib a[10]{};
+     VASurfaceAttribType types[] = {VASurfaceAttribPixelFormat, VASurfaceAttribMinWidth,
+                                    VASurfaceAttribMinHeight, VASurfaceAttribMaxWidth,
+                                    VASurfaceAttribMaxHeight, VASurfaceAttribMemoryType};
+@@ -408,6 +408,12 @@ API(
+     } else if (values[0] != VA_FOURCC_NV12 && (profile_format(profile) & VA_RT_FORMAT_YUV420)) {
+         a[n] = a[0];
+         a[n++].value.value.i = VA_FOURCC_NV12;
++    } if (config.entrypoint == VAEntrypointEncSlice &&
++             (profile_format(profile) & VA_RT_FORMAT_YUV420)) {
++        // The encoder takes I420 as well. Decoders and the video processor
++        // do not, so it is not offered to them.
++        a[n] = a[0];
++        a[n++].value.value.i = VA_FOURCC_I420;
+     } if (!attrs) {
+         *count = n;
+         return VA_STATUS_SUCCESS;
+@@ -557,7 +563,14 @@ API(
+               VA_STATUS_ERROR_ATTR_NOT_SUPPORTED);
+         if (attrs[i].type == VASurfaceAttribPixelFormat) {
+             unsigned requested = attrs[i].value.value.i;
+-            check(format == VA_RT_FORMAT_RGB32 ? is_rgb(requested) : requested == fourcc,
++            // An 8-bit surface may be I420. That is what FFmpeg's hwupload
++            // asks for when it uploads frames from memory, and with it RustDesk
++            // and every client built on libavutil: the client writes the three
++            // planes into the surface itself (tests/encoder/i420-surface.cpp).
++            check(format == VA_RT_FORMAT_RGB32       ? is_rgb(requested)
++                  : format == VA_RT_FORMAT_YUV420 ? requested == fourcc ||
++                                                       requested == VA_FOURCC_I420
++                                                   : requested == fourcc,
+                   "surface pixel format does not match RT format",
+                   VA_STATUS_ERROR_UNSUPPORTED_RT_FORMAT);
+             fourcc = requested;
+@@ -693,10 +706,17 @@ API(
+         check(c->decode_fourcc == VA_FOURCC_NV12 || c->decode_fourcc == VA_FOURCC_P010,
+               "unsupported decoder surface format", VA_STATUS_ERROR_UNSUPPORTED_RT_FORMAT);
+     }
+-    check(c->entrypoint == VAEntrypointVideoProc
+-              ? (s->fourcc == VA_FOURCC_NV12 || s->fourcc == VA_FOURCC_P010)
+-              : s->fourcc == (c->entrypoint == VAEntrypointVLD ? c->decode_fourcc
+-                                                            : profile_fourcc(c->internal_profile)),
++    // The encoder also takes I420 for an 8-bit profile; it interleaves the
++    // chroma on the way to the hardware.
++    const bool encoder_i420 =
++        c->entrypoint == VAEntrypointEncSlice && s->fourcc == VA_FOURCC_I420 &&
++        profile_fourcc(c->internal_profile) == VA_FOURCC_NV12;
++    check(encoder_i420 ||
++              (c->entrypoint == VAEntrypointVideoProc
++                   ? (s->fourcc == VA_FOURCC_NV12 || s->fourcc == VA_FOURCC_P010)
++                   : s->fourcc == (c->entrypoint == VAEntrypointVLD ? c->decode_fourcc
++                                                                     : profile_fourcc(
++                                                                           c->internal_profile))),
+           "surface format does not match context", VA_STATUS_ERROR_UNSUPPORTED_RT_FORMAT);
+     // Defer decoder creation until the target surface format is known.
+     if (c->entrypoint == VAEntrypointVLD && !c->decoder) {
+@@ -980,6 +1000,14 @@ API(
+     result.offsets[1] = m->chroma(); if (is_rgb(m->fourcc)) {
+         result.pitches[1] = 0;
+         result.offsets[1] = 0;
++    } if (m->fourcc == VA_FOURCC_I420) {
++        // U and V are two planes after the luma plane, each with half its
++        // pitch and half its rows.
++        validate_i420(*m, s->width, s->height);
++        result.num_planes = 3;
++        result.pitches[1] = result.pitches[2] = m->stride / 2;
++        result.offsets[1] = m->chroma();
++        result.offsets[2] = m->chroma_v();
+     } auto b = std::make_shared<Buffer>();
+     b->type = VAImageBufferType; b->element_size = result.data_size; b->elements = 1; b->parent = s;
+     b->memory = m; ++s->derived_images; d.buffers[result.buf] = b;
+@@ -1007,6 +1035,8 @@ API(
+               : (s->fourcc == VA_FOURCC_P010) == (image.format.fourcc == VA_FOURCC_P010),
+           "image bit depth conversion unsupported", VA_STATUS_ERROR_INVALID_IMAGE_FORMAT);
+     if (!s->memory) s->memory = allocate_undecoded_surface(ctx, *s); auto m = s->memory;
++    const bool planar = s->fourcc == VA_FOURCC_I420;
++    if (planar) validate_i420(*m, s->width, s->height);
+     auto source_buffer = buffer(d, image.buf); ImageMapping source(source_buffer);
+     auto destination_buffer = std::make_shared<Buffer>(); destination_buffer->parent = s;
+     destination_buffer->memory = m; ++s->derived_images;
+@@ -1019,6 +1049,27 @@ API(
+                     source.data + image.offsets[0] + (sy + row) * image.pitches[0] + sx * bytes,
+                     sw *bytes);
+     for (unsigned row = 0; !is_rgb(s->fourcc) && row < sh / 2; ++row) {
++        if (planar) {
++            // The surface has U and V in two planes, each with half the pitch.
++            auto *u = destination.data + m->chroma() + (dy / 2 + row) * (m->stride / 2) + dx / 2;
++            auto *v = destination.data + m->chroma_v() + (dy / 2 + row) * (m->stride / 2) + dx / 2;
++            if (image.format.fourcc == VA_FOURCC_I420) {
++                std::memcpy(u, source.data + image.offsets[1] + (sy / 2 + row) * image.pitches[1] +
++                                   sx / 2,
++                            sw / 2);
++                std::memcpy(v, source.data + image.offsets[2] + (sy / 2 + row) * image.pitches[2] +
++                                   sx / 2,
++                            sw / 2);
++            } else {
++                const auto *in = source.data + image.offsets[1] +
++                                 (sy / 2 + row) * image.pitches[1] + sx * bytes;
++                for (unsigned col = 0; col < sw / 2; ++col) {
++                    u[col] = in[2 * col];
++                    v[col] = in[2 * col + 1];
++                }
++            }
++            continue;
++        }
+         auto uv = destination.data + m->chroma() + (dy / 2 + row) * m->stride + dx * bytes;
+         if (image.format.fourcc == VA_FOURCC_I420) {
+             for (unsigned col = 0; col < sw / 2; ++col) {
+@@ -1089,8 +1140,29 @@ API(
+     for (unsigned row = 0; row < h; ++row)
+         std::memcpy(destination.data + image.offsets[0] + row * image.pitches[0],
+                     base + (y + row) * m->stride + x * bytes_per_sample, w *bytes_per_sample);
+-    uint8_t *uv = m->map() + m->chroma() + (y / 2) * m->stride + x * bytes_per_sample;
++    const bool planar = m->fourcc == VA_FOURCC_I420;
++    if (planar) validate_i420(*m, s->width, s->height);
++    uint8_t *uv = m->map() + m->chroma() + (y / 2) * (planar ? m->stride / 2 : m->stride) +
++                  (planar ? x / 2 : x * bytes_per_sample);
+     for (unsigned row = 0; !is_rgb(m->fourcc) && row < (h + 1) / 2; ++row) {
++        if (planar) {
++            // U and V are two planes on the surface, each with half the pitch.
++            const auto *u = uv + row * (m->stride / 2);
++            const auto *v = m->map() + m->chroma_v() + (y / 2) * (m->stride / 2) + x / 2 +
++                            row * (m->stride / 2);
++            if (image.format.fourcc == VA_FOURCC_I420) {
++                std::memcpy(destination.data + image.offsets[1] + row * image.pitches[1], u,
++                            (w + 1) / 2);
++                std::memcpy(destination.data + image.offsets[2] + row * image.pitches[2], v,
++                            (w + 1) / 2);
++            } else
++                for (unsigned col = 0; col < (w + 1) / 2; ++col) {
++                    destination.data[image.offsets[1] + row * image.pitches[1] + 2 * col] = u[col];
++                    destination.data[image.offsets[1] + row * image.pitches[1] + 2 * col + 1] =
++                        v[col];
++                }
++            continue;
++        }
+         if (image.format.fourcc != VA_FOURCC_I420)
+             std::memcpy(destination.data + image.offsets[1] + row * image.pitches[1],
+                         uv + row * m->stride, ((w + 1) & ~1u) * bytes_per_sample);
+@@ -1111,6 +1183,8 @@ API(
+     check(type == VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2, "export requires DRM PRIME2",
+           VA_STATUS_ERROR_UNSUPPORTED_MEMORY_TYPE);
+     auto s = surface(d, id); synchronize(d, s);
++    check(s->fourcc != VA_FOURCC_I420, "I420 surfaces cannot be exported",
++          VA_STATUS_ERROR_UNIMPLEMENTED);
+     // GPU producers such as Sunshine render into exported encoder input.
+     // Independent storage is writable: Iris CAPTURE allocations
+     // may still be decoder references and have cached CPU aliases.
+diff --git a/src/encoder.cpp b/src/encoder.cpp
+index c8b12ad..1f3a34e 100644
+--- a/src/encoder.cpp
++++ b/src/encoder.cpp
+@@ -810,8 +810,10 @@ std::shared_ptr<EncodeTask> Encoder::encode(const EncodeSettings &s, const Encod
+                  : p.params.pic_fields.bits.reference_pic_flag,
+           "non-reference encoding unsupported", VA_STATUS_ERROR_UNIMPLEMENTED);
+     auto memory = input->memory;
+-    check(memory && memory->fourcc == VA_FOURCC_NV12 && memory->width >= e.width &&
+-              memory->height >= e.height,
++    // I420 comes in as the clients that upload from memory write it, three
++    // planes; it is interleaved into the NV12 input below.
++    check(memory && (memory->fourcc == VA_FOURCC_NV12 || memory->fourcc == VA_FOURCC_I420) &&
++              memory->width >= e.width && memory->height >= e.height,
+           "invalid encoder input surface", VA_STATUS_ERROR_INVALID_SURFACE);
+     check(!output.coded_mapped, "coded buffer is mapped", VA_STATUS_ERROR_SURFACE_BUSY);
+     int qp = s.hevc ? int(p.hevc_params.pic_init_qp) + p.hevc_slices.front().slice_qp_delta
+@@ -850,7 +852,7 @@ std::shared_ptr<EncodeTask> Encoder::encode(const EncodeSettings &s, const Encod
+             e.refresh();
+         }
+         const bool direct =
+-            e.import && memory->fd >= 0 &&
++            memory->fourcc == VA_FOURCC_NV12 && e.import && memory->fd >= 0 &&
+             (memory->origin == MemoryOrigin::MsmCoherent || memory->origin == MemoryOrigin::Iris ||
+              memory->origin == MemoryOrigin::DmaHeap) &&
+             memory->stride == e.stride && memory->storage_height == e.storage_height &&
+@@ -878,7 +880,11 @@ std::shared_ptr<EncodeTask> Encoder::encode(const EncodeSettings &s, const Encod
+                 if (!e.copier)
+                     e.copier = std::make_unique<SurfaceCopier>(e.render_fd);
+             }
+-            e.copier->copy(e.staging[index], memory, e.width, e.height);
++            if (memory->fourcc == VA_FOURCC_I420)
++                // The copier takes NV12 and P010 only.
++                copy_surface(*e.staging[index], *memory, e.width, e.height);
++            else
++                e.copier->copy(e.staging[index], memory, e.width, e.height);
+             memory = e.staging[index];
+         }
+         // Retain the input through both DQBUFs, and STREAMOFF before releasing
+diff --git a/src/internal.hpp b/src/internal.hpp
+index efaadd9..c60fcf7 100644
+--- a/src/internal.hpp
++++ b/src/internal.hpp
+@@ -72,6 +72,11 @@ struct Memory {
+     size_t chroma() const {
+         return size_t(data_offset) + size_t(stride) * storage_height + chroma_skew;
+     }
++    // The V plane of an I420 surface: after the U plane, which has half the
++    // pitch and half the rows of the luma plane.
++    size_t chroma_v() const {
++        return chroma() + size_t(stride / 2) * (storage_height / 2);
++    }
+ };
+ class Decoder;
+ class SurfaceCopier {
+@@ -284,6 +289,9 @@ class Encoder {
+     void finish();
+ };
+ void copy_surface(Memory &destination, Memory &source, unsigned width, unsigned height);
++// An I420 surface keeps U and V in two planes after the luma plane, each with
++// half its pitch and half its rows; both must lie within the allocation.
++void validate_i420(const Memory &memory, unsigned width, unsigned height);
+ std::shared_ptr<Memory> allocate_surface(int render_fd, unsigned width, unsigned height,
+                                          unsigned fourcc);
+ void fill_neutral_surface(Memory &memory, unsigned width, unsigned height);
+diff --git a/src/surface-copy.cpp b/src/surface-copy.cpp
+index 8629b82..b85b418 100644
+--- a/src/surface-copy.cpp
++++ b/src/surface-copy.cpp
+@@ -65,6 +65,13 @@ void validate(const Memory &m, unsigned width, unsigned height, unsigned bytes)
+           "persistent surface copy exceeds buffer layout", VA_STATUS_ERROR_INVALID_SURFACE);
+ }
+ } // namespace
++void validate_i420(const Memory &m, unsigned width, unsigned height) {
++    const uint64_t chroma_rows = (height + 1) / 2;
++    check(m.stride % 2 == 0 && m.storage_height % 2 == 0 && (width + 1) / 2 <= m.stride / 2 &&
++              height <= m.storage_height && chroma_rows <= m.storage_height / 2 &&
++              m.chroma_v() + (chroma_rows - 1) * (m.stride / 2) + (width + 1) / 2 <= m.size,
++          "I420 surface copy exceeds buffer layout", VA_STATUS_ERROR_INVALID_SURFACE);
++}
+ std::shared_ptr<Memory> allocate_surface(int render_fd, unsigned width, unsigned height,
+                                          unsigned fourcc) {
+     auto m = std::make_shared<Memory>();
+@@ -116,18 +123,25 @@ void fill_neutral_surface(Memory &memory, unsigned width, unsigned height) {
+     write.finish();
+ }
+ void copy_surface(Memory &destination, Memory &source, unsigned width, unsigned height) {
+-    check(destination.fourcc == source.fourcc &&
+-              (source.fourcc == VA_FOURCC_NV12 || source.fourcc == VA_FOURCC_P010),
++    // I420 is the one input that is not in the encoder's own layout: its
++    // chroma is in two planes, which go into the NV12 plane interleaved.
++    const bool planar = source.fourcc == VA_FOURCC_I420;
++    check(planar ? destination.fourcc == VA_FOURCC_NV12
++                 : destination.fourcc == source.fourcc &&
++                       (source.fourcc == VA_FOURCC_NV12 || source.fourcc == VA_FOURCC_P010),
+           "persistent surface copy format mismatch", VA_STATUS_ERROR_INVALID_IMAGE_FORMAT);
+     unsigned bytes = source.fourcc == VA_FOURCC_P010 ? 2 : 1;
+-    validate(source, width, height, bytes);
++    if (planar)
++        validate_i420(source, width, height);
++    else
++        validate(source, width, height, bytes);
+     validate(destination, width, height, bytes);
+     auto start = std::chrono::steady_clock::now();
+     auto *src = source.map();
+     auto *dst = destination.map();
+     CpuAccess read(source, DMA_BUF_SYNC_READ);
+     CpuAccess write(destination, DMA_BUF_SYNC_WRITE);
+-    for (unsigned plane = 0; plane < 2; ++plane) {
++    for (unsigned plane = 0; plane < (planar ? 1u : 2u); ++plane) {
+         size_t src_offset = plane ? source.chroma() : source.data_offset;
+         size_t dst_offset = plane ? destination.chroma() : destination.data_offset;
+         unsigned rows = plane ? (height + 1) / 2 : height;
+@@ -136,6 +150,18 @@ void copy_surface(Memory &destination, Memory &source, unsigned width, unsigned
+             std::memcpy(dst + dst_offset + size_t(row) * destination.stride,
+                         src + src_offset + size_t(row) * source.stride, row_bytes);
+     }
++    if (planar) {
++        const unsigned pitch = source.stride / 2, pairs = (width + 1) / 2;
++        const uint8_t *u = src + source.chroma();
++        const uint8_t *v = src + source.chroma_v();
++        for (unsigned row = 0; row < (height + 1) / 2; ++row) {
++            auto *out = dst + destination.chroma() + size_t(row) * destination.stride;
++            for (unsigned col = 0; col < pairs; ++col) {
++                out[2 * col] = u[size_t(row) * pitch + col];
++                out[2 * col + 1] = v[size_t(row) * pitch + col];
++            }
++        }
++    }
+     write.finish();
+     read.finish();
+     if (debug()) {
+diff --git a/tests/encoder/i420-surface.cpp b/tests/encoder/i420-surface.cpp
+new file mode 100644
+index 0000000..7ac84b1
+--- /dev/null
++++ b/tests/encoder/i420-surface.cpp
+@@ -0,0 +1,378 @@
++// SPDX-License-Identifier: MIT
++// Board test: c++ -std=c++17 -O2 tests/encoder/i420-surface.cpp -lva -lva-drm -o i420-surface
++// Usage: i420-surface [--hevc]
++// Surfaces in I420, which is what FFmpeg's hwupload asks for when it uploads
++// frames from memory (and with it RustDesk and every client built on
++// libavutil), on the encoder session of async.cpp: 640x480, CQP, QP 24 or 28
++// in blocks of 23 frames, an IDR every 17 frames.
++//
++//  1. vaQuerySurfaceAttributes offers I420 for the encoder's config.
++//  2. The image paths on an I420 surface, against a frame held in three
++//     planes. Written through vaDeriveImage, read back with vaGetImage as
++//     I420 and as NV12; written with vaPutImage from an I420 image and from
++//     an NV12 image, read back again. Every sample must be where it started,
++//     U and V not swapped. Export is refused.
++//  3. The encoder. The same 96 frames go in twice: A the way that has always
++//     worked, an I420 image put onto an NV12 surface with vaPutImage; B the
++//     way libavutil does it, written straight into an I420 surface through
++//     vaDeriveImage. The two bitstreams must be the same: the hardware gets
++//     the same samples, or the streams differ.
++//
++// Exits 0 when all of that holds, 1 when the streams differ, 2 otherwise.
++#include <va/va.h>
++#include <va/va_drm.h>
++#include <va/va_enc_h264.h>
++#include <va/va_enc_hevc.h>
++#include <fcntl.h>
++#include <unistd.h>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <string>
++#include <vector>
++
++namespace {
++bool hevc = false;
++constexpr unsigned count = 12, width = 640, height = 480, frames = 96;
++
++void expect(VAStatus got, VAStatus wanted = VA_STATUS_SUCCESS) {
++    if (got != wanted) {
++        std::fprintf(stderr, "Expected %s, got %s\n", vaErrorStr(wanted), vaErrorStr(got));
++        std::exit(2);
++    }
++}
++void require(bool value, const char *message) {
++    if (!value) {
++        std::fprintf(stderr, "%s\n", message);
++        std::exit(2);
++    }
++}
++
++// The frame in three planes: the luma of async.cpp, and chroma in which U and
++// V differ at every sample, so that a swap shows.
++unsigned char sample(unsigned plane, unsigned x, unsigned y, unsigned frame) {
++    if (!plane)
++        return 16 + (x / 8 + y / 8 + frame * 7) % 200;
++    return plane == 1 ? (x + y * 3 + frame * 5) % 256
++                      : (x * 3 + y + frame * 11 + 97) % 256;
++}
++
++VAImage image(VADisplay d, unsigned fourcc) {
++    VAImageFormat format{};
++    format.fourcc = fourcc;
++    format.byte_order = VA_LSB_FIRST;
++    format.bits_per_pixel = 12;
++    VAImage out;
++    expect(vaCreateImage(d, &format, width, height, &out));
++    return out;
++}
++
++// A mapped image, I420 or NV12, filled with a frame or held against one.
++struct Mapped {
++    VADisplay display;
++    VAImage info;
++    unsigned char *data;
++    Mapped(VADisplay d, const VAImage &i) : display(d), info(i) {
++        expect(vaMapBuffer(d, i.buf, reinterpret_cast<void **>(&data)));
++    }
++    ~Mapped() { vaUnmapBuffer(display, info.buf); }
++    bool i420() const { return info.format.fourcc == VA_FOURCC_I420; }
++    // The chroma sample: in a plane of its own in I420, interleaved in NV12.
++    unsigned char *chroma(unsigned x, unsigned y, unsigned plane) {
++        if (i420())
++            return data + info.offsets[plane] + y * info.pitches[plane] + x;
++        return data + info.offsets[1] + y * info.pitches[1] + 2 * x + (plane - 1);
++    }
++    void fill(unsigned frame) {
++        for (unsigned y = 0; y < height; ++y)
++            for (unsigned x = 0; x < width; ++x)
++                data[info.offsets[0] + y * info.pitches[0] + x] = sample(0, x, y, frame);
++        for (unsigned y = 0; y < height / 2; ++y)
++            for (unsigned x = 0; x < width / 2; ++x)
++                for (unsigned plane = 1; plane < 3; ++plane)
++                    *chroma(x, y, plane) = sample(plane, x, y, frame);
++    }
++    bool equals(unsigned frame) {
++        for (unsigned y = 0; y < height; ++y)
++            for (unsigned x = 0; x < width; ++x)
++                if (data[info.offsets[0] + y * info.pitches[0] + x] != sample(0, x, y, frame))
++                    return false;
++        for (unsigned y = 0; y < height / 2; ++y)
++            for (unsigned x = 0; x < width / 2; ++x)
++                for (unsigned plane = 1; plane < 3; ++plane)
++                    if (*chroma(x, y, plane) != sample(plane, x, y, frame))
++                        return false;
++        return true;
++    }
++};
++
++// The way libavutil uploads: the surface's own image, written in place.
++void derive(VADisplay d, VASurfaceID surface, unsigned frame) {
++    VAImage own;
++    expect(vaDeriveImage(d, surface, &own));
++    require(own.format.fourcc == VA_FOURCC_I420 && own.num_planes == 3,
++            "the image derived from an I420 surface is not I420 in three planes");
++    {
++        Mapped mapped(d, own);
++        mapped.fill(frame);
++    }
++    vaDestroyImage(d, own.image_id);
++}
++// The frame put on a surface from an image of the given format.
++void put(VADisplay d, VASurfaceID surface, unsigned fourcc, unsigned frame) {
++    VAImage write = image(d, fourcc);
++    {
++        Mapped mapped(d, write);
++        mapped.fill(frame);
++    }
++    expect(vaPutImage(d, surface, write.image_id, 0, 0, width, height, 0, 0, width, height));
++    vaDestroyImage(d, write.image_id);
++}
++// Whether a surface, read back as an image of the given format, is the frame.
++bool holds(VADisplay d, VASurfaceID surface, unsigned fourcc, unsigned frame) {
++    VAImage read = image(d, fourcc);
++    expect(vaGetImage(d, surface, 0, 0, width, height, read.image_id));
++    bool same;
++    {
++        Mapped mapped(d, read);
++        same = mapped.equals(frame);
++    }
++    vaDestroyImage(d, read.image_id);
++    return same;
++}
++
++void create_inputs(VADisplay d, bool planar, VASurfaceID *surfaces) {
++    if (!planar) {
++        expect(vaCreateSurfaces(d, VA_RT_FORMAT_YUV420, width, height, surfaces, count, nullptr, 0));
++        return;
++    }
++    VASurfaceAttrib attrs[2]{};
++    attrs[0].type = VASurfaceAttribPixelFormat;
++    attrs[0].flags = VA_SURFACE_ATTRIB_SETTABLE;
++    attrs[0].value.type = VAGenericValueTypeInteger;
++    attrs[0].value.value.i = VA_FOURCC_I420;
++    attrs[1] = attrs[0];
++    attrs[1].type = VASurfaceAttribMemoryType;
++    attrs[1].value.value.i = VA_SURFACE_ATTRIB_MEM_TYPE_VA;
++    expect(vaCreateSurfaces(d, VA_RT_FORMAT_YUV420, width, height, surfaces, count, attrs, 2));
++}
++
++struct Session {
++    VADisplay display;
++    VAConfigID config;
++    VAContextID context;
++    bool planar;
++    VASurfaceID inputs[count], recon[count];
++    VABufferID coded[count];
++    explicit Session(VADisplay d, bool p) : display(d), planar(p) {
++        VAConfigAttrib attr{VAConfigAttribRateControl, VA_RC_CQP};
++        expect(vaCreateConfig(d, hevc ? VAProfileHEVCMain : VAProfileH264High, VAEntrypointEncSlice,
++                              &attr, 1, &config));
++        create_inputs(d, planar, inputs);
++        expect(vaCreateSurfaces(d, VA_RT_FORMAT_YUV420, width, height, recon, count, nullptr, 0));
++        expect(vaCreateContext(d, config, width, height, VA_PROGRESSIVE, inputs, count, &context));
++        for (unsigned i = 0; i < count; ++i)
++            expect(vaCreateBuffer(d, context, VAEncCodedBufferType, width * height * 3, 1, nullptr,
++                                  &coded[i]));
++    }
++    ~Session() {
++        if (context != VA_INVALID_ID)
++            vaDestroyContext(display, context);
++        for (auto id : coded)
++            if (id != VA_INVALID_ID)
++                vaDestroyBuffer(display, id);
++        for (auto id : inputs)
++            if (id != VA_INVALID_SURFACE)
++                vaDestroySurfaces(display, &id, 1);
++        vaDestroySurfaces(display, recon, count);
++        vaDestroyConfig(display, config);
++    }
++    // The frame goes in, then is encoded; an IDR every 17 frames.
++    void submit(unsigned frame) {
++        unsigned i = frame % count;
++        if (planar)
++            derive(display, inputs[i], frame);
++        else
++            put(display, inputs[i], VA_FOURCC_I420, frame);
++        VAEncPictureParameterBufferH264 pic{};
++        VAEncSliceParameterBufferH264 slice{};
++        VAEncPictureParameterBufferHEVC hp{};
++        VAEncSliceParameterBufferHEVC sl{};
++        const bool idr = frame % 17 == 0;
++        VABufferID parameters[3];
++        if (hevc) {
++            VAEncSequenceParameterBufferHEVC hs{};
++            hs.general_profile_idc = 1;
++            hs.general_level_idc = 93;
++            hs.pic_width_in_luma_samples = width;
++            hs.pic_height_in_luma_samples = height;
++            hs.seq_fields.bits.chroma_format_idc = 1;
++            hs.log2_diff_max_min_luma_coding_block_size = 2;
++            hs.ip_period = 1;
++            hp.decoded_curr_pic.picture_id = recon[i];
++            hp.coded_buf = coded[i];
++            hp.pic_init_qp = (frame / 23) % 2 ? 28 : 24;
++            hp.pic_fields.bits.idr_pic_flag = idr;
++            hp.pic_fields.bits.coding_type = idr ? 1 : 2;
++            hp.pic_fields.bits.reference_pic_flag = 1;
++            sl.num_ctu_in_slice = (width + 31) / 32 * ((height + 31) / 32);
++            sl.slice_type = idr ? 2 : 1;
++            sl.ref_pic_list0[0].picture_id = recon[(i + count - 1) % count];
++            sl.slice_fields.bits.last_slice_of_pic_flag = 1;
++            sl.slice_fields.bits.slice_loop_filter_across_slices_enabled_flag = 1;
++            expect(vaCreateBuffer(display, context, VAEncSequenceParameterBufferType, sizeof(hs), 1,
++                                  &hs, &parameters[0]));
++            expect(vaCreateBuffer(display, context, VAEncPictureParameterBufferType, sizeof(hp), 1,
++                                  &hp, &parameters[1]));
++            expect(vaCreateBuffer(display, context, VAEncSliceParameterBufferType, sizeof(sl), 1, &sl,
++                                  &parameters[2]));
++        } else {
++            VAEncSequenceParameterBufferH264 seq{};
++            seq.level_idc = 31;
++            seq.picture_width_in_mbs = width / 16;
++            seq.picture_height_in_mbs = height / 16;
++            seq.seq_fields.bits.frame_mbs_only_flag = 1;
++            seq.seq_fields.bits.chroma_format_idc = 1;
++            seq.ip_period = 1;
++            seq.intra_period = seq.intra_idr_period = 17;
++            seq.max_num_ref_frames = 1;
++            pic.CurrPic.picture_id = recon[i];
++            pic.coded_buf = coded[i];
++            pic.pic_init_qp = (frame / 23) % 2 ? 28 : 24;
++            pic.pic_fields.bits.idr_pic_flag = idr;
++            pic.pic_fields.bits.reference_pic_flag = 1;
++            pic.pic_fields.bits.entropy_coding_mode_flag = 1;
++            slice.num_macroblocks = width / 16 * (height / 16);
++            slice.slice_type = idr ? 2 : 0;
++            slice.macroblock_info = VA_INVALID_ID;
++            slice.RefPicList0[0].picture_id = recon[(i + count - 1) % count];
++            expect(vaCreateBuffer(display, context, VAEncSequenceParameterBufferType, sizeof(seq),
++                                  1, &seq, &parameters[0]));
++            expect(vaCreateBuffer(display, context, VAEncPictureParameterBufferType, sizeof(pic), 1,
++                                  &pic, &parameters[1]));
++            expect(vaCreateBuffer(display, context, VAEncSliceParameterBufferType, sizeof(slice), 1,
++                                  &slice, &parameters[2]));
++        }
++        expect(vaBeginPicture(display, context, inputs[i]));
++        expect(vaRenderPicture(display, context, parameters, 3));
++        expect(vaEndPicture(display, context));
++        for (auto id : parameters)
++            expect(vaDestroyBuffer(display, id));
++    }
++    void collect(unsigned frame, std::vector<unsigned char> &stream, std::vector<size_t> &sizes) {
++        unsigned i = frame % count;
++        expect(vaSyncBuffer(display, coded[i], VA_TIMEOUT_INFINITE));
++        void *data;
++        expect(vaMapBuffer(display, coded[i], &data));
++        auto *seg = static_cast<VACodedBufferSegment *>(data);
++        require(seg->size && seg->buf && !seg->next && !seg->status, "invalid coded segment");
++        auto *bytes = static_cast<unsigned char *>(seg->buf);
++        stream.insert(stream.end(), bytes, bytes + seg->size);
++        sizes.push_back(seg->size);
++        expect(vaUnmapBuffer(display, coded[i]));
++    }
++};
++
++void encode(VADisplay d, bool planar, std::vector<unsigned char> &stream,
++            std::vector<size_t> &sizes) {
++    Session session(d, planar);
++    stream.clear();
++    sizes.clear();
++    for (unsigned i = 0; i < frames; ++i) {
++        session.submit(i);
++        session.collect(i, stream, sizes);
++    }
++}
++
++void write(const char *path, const std::vector<unsigned char> &stream) {
++    FILE *f = std::fopen(path, "wb");
++    require(f && std::fwrite(stream.data(), 1, stream.size(), f) == stream.size(), "write");
++    std::fclose(f);
++}
++} // namespace
++
++int main(int argc, char **argv) {
++    for (int i = 1; i < argc; ++i)
++        if (!std::strcmp(argv[i], "--hevc"))
++            hevc = true;
++    int fd = open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC);
++    require(fd >= 0, "open the render node");
++    VADisplay display = vaGetDisplayDRM(fd);
++    int major, minor;
++    expect(vaInitialize(display, &major, &minor));
++    const VAProfile profile = hevc ? VAProfileHEVCMain : VAProfileH264High;
++
++    // 1. The config offers I420.
++    VAConfigAttrib attr{VAConfigAttribRateControl, VA_RC_CQP};
++    VAConfigID config;
++    expect(vaCreateConfig(display, profile, VAEntrypointEncSlice, &attr, 1, &config));
++    unsigned n = 0;
++    expect(vaQuerySurfaceAttributes(display, config, nullptr, &n));
++    std::vector<VASurfaceAttrib> attrs(n);
++    expect(vaQuerySurfaceAttributes(display, config, attrs.data(), &n));
++    unsigned formats = 0;
++    bool offered = false;
++    for (unsigned i = 0; i < n; ++i) {
++        if (attrs[i].type != VASurfaceAttribPixelFormat)
++            continue;
++        ++formats;
++        offered |= attrs[i].value.value.i == VA_FOURCC_I420;
++    }
++    require(formats > 1 && offered, "I420 is not offered for the encoder's config");
++    vaDestroyConfig(display, config);
++    std::printf("1. I420 is offered for the encoder's config, with %u pixel formats in all\n",
++                formats);
++
++    // 2. The image paths.
++    VASurfaceID surface[count];
++    create_inputs(display, true, surface);
++    derive(display, surface[0], 100);
++    require(holds(display, surface[0], VA_FOURCC_I420, 100),
++            "written through the derived image, read back as I420: not the frame");
++    require(holds(display, surface[0], VA_FOURCC_NV12, 100),
++            "written through the derived image, read back as NV12: not the frame");
++    put(display, surface[0], VA_FOURCC_I420, 101);
++    require(holds(display, surface[0], VA_FOURCC_I420, 101),
++            "put from an I420 image, read back: not the frame");
++    put(display, surface[0], VA_FOURCC_NV12, 102);
++    require(holds(display, surface[0], VA_FOURCC_I420, 102),
++            "put from an NV12 image, read back as I420: not the frame");
++    require(holds(display, surface[0], VA_FOURCC_NV12, 102),
++            "put from an NV12 image, read back as NV12: not the frame");
++#if VA_CHECK_VERSION(2, 4, 0)
++    VADRMPRIMESurfaceDescriptor descriptor{};
++    require(vaExportSurfaceToDMABuf(display, surface[0], VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2,
++                                    VA_EXPORT_SURFACE_READ_ONLY, &descriptor) ==
++                VA_STATUS_ERROR_UNIMPLEMENTED,
++            "an I420 surface could be exported");
++#endif
++    vaDestroySurfaces(display, surface, count);
++    std::puts("2. the image paths on an I420 surface: every sample where it was put");
++
++    // 3. The encoder, by the two ways in.
++    std::vector<unsigned char> a, b;
++    std::vector<size_t> a_sizes, b_sizes;
++    encode(display, false, a, a_sizes);
++    encode(display, true, b, b_sizes);
++    if (a == b) {
++        std::printf("3. the same %u frames by vaPutImage onto NV12 and written straight into I420: "
++                    "one bitstream, %zu bytes\n",
++                    frames, a.size());
++        return 0;
++    }
++    unsigned differing = 0, first = frames;
++    for (unsigned i = 0; i < frames; ++i)
++        if (a_sizes[i] != b_sizes[i]) {
++            ++differing;
++            if (first == frames)
++                first = i;
++        }
++    std::printf("3. the two ways in give different bitstreams: %zu and %zu bytes; frames whose size "
++                "differs: %u, the first is frame %u%s\n",
++                a.size(), b.size(), differing, first,
++                differing ? "" : " (none: same sizes, other bytes)");
++    write("i420-a.h264", a);
++    write("i420-b.h264", b);
++    std::puts("   both are written: i420-a.h264 (put onto NV12) and i420-b.h264 (written into I420)");
++    return 1;
++}
+diff --git a/tests/encoder/meson.build b/tests/encoder/meson.build
+index 6301311..220dbdc 100644
+--- a/tests/encoder/meson.build
++++ b/tests/encoder/meson.build
+@@ -51,6 +51,14 @@ executable(
+   install_dir: tests_install_dir / 'encoder',
+ )
+ 
++executable(
++  'i420-surface',
++  'i420-surface.cpp',
++  dependencies: [va, va_drm],
++  install: true,
++  install_dir: tests_install_dir / 'encoder',
++)
++
+ shared_module(
+   'reject-coherent',
+   'reject-coherent.c',
+-- 
+2.54.0
+

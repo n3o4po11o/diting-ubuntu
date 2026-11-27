@@ -551,7 +551,8 @@ debootstrap 在 qemu 下约 6 分钟，一次编译约 6 分钟。
 流里的时序信息还是会话开始时的那个，码率预算跟着时间戳走。QP 上下限、level、熵编码、去块滤波
 仍然要新上下文（内核在流中拒绝 QP 上下限的控件）。
 
-第三个缺陷（0003）是下午 0137 上机之后才露出来的，见 12.7。三个补丁都值得报给上游
+第三个缺陷（0003）是下午 0137 上机之后才露出来的，见 12.7。第四个（0004，I420 的 surface 被拒）
+是晚上查 RustDesk 那条路时发现的，见 12.8。四个补丁都值得报给上游
 （`radxa-pkg/qcom-va-driver`），还没报。
 
 ### 12.4 对评估的更正
@@ -590,11 +591,11 @@ debootstrap 在 qemu 下约 6 分钟，一次编译约 6 分钟。
 1. **方案 A 还是 B**：它现在只是解码的问题（换不换驱动去解码）。编码这一半浏览器在这台手机上
    用不上，跟驱动无关（12.7）。ffmpeg 一层的解码回归通过；还差浏览器播放的回归。
 2. **浏览器里用上硬件编码**：要上游动手，两条路任选其一（12.7）。不在仓库里。
-3. **RustDesk 这类用 I420 上传的客户端**：驱动补一个 I420 的 surface，送编码器前转成 NV12
-   （12.7）。写了之后装上 RustDesk 实测。
+3. **RustDesk 实测**：驱动这边通了（12.8，第四个补丁）；还差在手机上装 RustDesk，带着
+   `LIBVA_DRIVER_NAME=qcom` 跑一次（装不装机主决定）。
 4. 真实会议画面的码控、首帧和关键帧的延迟、对端解码器：只对用得上 VA-API 编码器的客户端有意义
    （比如装了 `gstreamer1.0-va` 的 GStreamer 应用）。
-5. 三个补丁报给上游。
+5. 四个补丁报给上游（报之前清掉 12.8 末尾那处编译警告）。
 6. `qcom-va-driver` 进不进镜像：现在只是手机上手工装的。
 
 ### 12.7 下午：0137 上机之后
@@ -657,7 +658,8 @@ Linux 上固定选 GPU 缓冲，没有开关。要浏览器在这台手机上用
 支持经 GBM 分配 NV12（Wayland 下还得能扫描输出），或者 Chromium 的适配层在 GBM 做不出时改用
 共享内存输入。
 
-**另一个客户端：RustDesk，卡在 I420 上传。** 机主问能不能用 RustDesk 测编码。手机上没装它；
+**另一个客户端：RustDesk，卡在 I420 上传**（当晚驱动补上了，见 12.8）。机主问能不能用
+RustDesk 测编码。手机上没装它；
 读的是它的 `hwcodec`（`rustdesk-org/hwcodec`）：Linux 上的硬件编码是 ffmpeg 的 `h264_vaapi`，
 设备用默认的渲染节点，帧是 I420，经 `av_hwframe_transfer_data()` 送进 VA surface；
 `async_depth=1`，`idr_interval` 和 `gop_size` 最大，低延迟，码控用 ffmpeg 的默认模式加码率，运行中
@@ -679,10 +681,64 @@ C 的数（其余参数和 RustDesk 一样，300 帧，两次运行）：
 | 1920×1080 | 107、122 帧/秒 | 7481 kbit/s | 6000 |
 | 2340×1080（屏幕） | 84、84 帧/秒 | 9898 kbit/s | 8000 |
 
-所以 RustDesk 配现在的驱动会留在软编。要它能用，三件事：驱动支持 I420 的 surface，送编码器之前
-转成 NV12（第四个补丁，还没写）；RustDesk 的进程里有 `LIBVA_DRIVER_NAME=qcom`；手机上装 RustDesk。
+所以 RustDesk 配第四个补丁之前的驱动会留在软编。要它能用，三件事：驱动支持 I420 的 surface，送编码器之前
+转成 NV12（第四个补丁，12.8）；RustDesk 的进程里有 `LIBVA_DRIVER_NAME=qcom`；手机上装 RustDesk。
 RustDesk 在这台手机上能不能抓到屏幕（Wayland 下要经 portal）没试过。
 
 **这对 0 节的路线意味着什么**：评估时把“浏览器里视频通话用上硬件编码”当作目标，S0 的结果
 回答了它——驱动、内核、固件这一半都通了，卡在 Chromium 和 Mesa 之间。VA-API 编码器本身在这台
 手机上是可用的，只是没有现成的浏览器客户端。
+
+### 12.8 晚上：RustDesk 的路，第四个补丁
+
+**补丁 0004：编码器收 I420 的 surface。**
+`patches/0004-surfaces-take-I420-on-the-encoder-the-format-FFmpeg-u.patch`，包
+`1.1.1+gitee8622c-0diting5`。12.7 末尾那个卡点的解法。
+
+- **做法。** I420 的 surface 就是 NV12 的 surface 一直用的那块内存（两种格式总大小相同，分配不用
+  动），按三个平面读：亮度之后是 U，U 之后是 V，各占一半的跨距、一半的行。`vaDeriveImage` 给出
+  三个平面的图像，客户端原地写入，自己不做任何转换——比 NV12 那条路还省一次 CPU 转换。
+  `vaGetImage`、`vaPutImage` 在 I420 的 surface 两侧都收 I420 和 NV12 的图像。编码器在本来就要
+  拷一帧的那一步（`copy_surface`）里把色度交织成 NV12。
+- **只对编码开放。** `vaQuerySurfaceAttributes` 只给编码的 config 列出 I420；解码和 VPP 还是
+  NV12/P010；I420 的 surface 不能导出。
+- **测试 `tests/encoder/i420-surface`**（收进包里）：
+  1. 编码的 config 列出了 I420。
+  2. 图像读写：同一帧经 `vaDeriveImage` 写入，用 `vaGetImage` 按 I420、按 NV12 读回；再用
+     `vaPutImage` 从 I420 图像、从 NV12 图像写入，读回。每个样本都要在原处，U、V 不许对调
+     （色度让每个样本上 U、V 都不同，调换会暴露）；导出被拒。
+  3. 同一批 96 帧（async.cpp 的会话：640×480，CQP，QP 24/28，每 17 帧一个 IDR）走两条路进
+     编码器：A 是一直能用的“`vaPutImage` 把 I420 图像放到 NV12 surface 上”，B 是 libavutil 的
+     做法“直接写进 I420 的 surface”。两条路的码流必须逐字节相同。
+
+**结果**（手机上 `1.1.1+gitee8622c-0diting5`；脚本 `phone-qva-i420.sh`、`phone-qva-final2.sh`，工作区
+`liuqin-study/scripts/`；日志 `liuqin-study/raw/vaenc-eval/rustdesk-2026-11-27/`）：
+
+| `i420-surface` | 结果 |
+| --- | --- |
+| H.264 | 三步都过；两条路一个码流，1,244,256 字节 |
+| HEVC | 三步都过；两条路一个码流，2,268,009 字节 |
+
+ffmpeg 8.0.1，RustDesk 给 `h264_vaapi` 的参数，`testsrc2`，300 帧，I420 直接上传（12.7 里败在建
+surface 的那条命令）：
+
+| 尺寸 | 帧率 | 码率（要的） | 和“CPU 先转 NV12 再上传”的码流比 | 解回来对源的 PSNR |
+| --- | --- | --- | --- | --- |
+| 1280×720 | 169 帧/秒 | 4127 kbit/s（4000） | 逐字节相同 | 45.4 dB |
+| 1920×1080 | 120 帧/秒 | 7481 kbit/s（6000） | 逐字节相同 | 44.6 dB |
+| 2340×1080（屏幕） | 96 帧/秒 | 9898 kbit/s（8000） | 逐字节相同 | 44.4 dB |
+
+“逐字节相同”是这里最要紧的一个数：同一个源，CPU 先转 NV12 再上传（swscale 转换）和 I420 直接
+上传（驱动交织），编码器收到的样本必须一模一样，码流才会相同。
+
+整套回归（`phone-qva-final2.sh`）和下午 `0diting4` 的那份日志逐行对比：除了版本号和指针地址，行为
+完全相同——请求关键帧落在指定的帧上；上游测试原样全过（`api-smoke`；`async` H.264 20 遍、HEVC 10 遍
+零失败；`ffmpeg-smoke.py` 9 个用例）；`async-dump` H.264 100 轮、HEVC 30 轮全同；`rate-change` 和
+码控对照十个数一个不差（后者那一步脚本要的工作目录 `~/qva/s0` 不在了，单独补跑的）；解码回归（两个
+驱动）相同，包括 10-bit 的 P010；74 条流的矩阵零失败；内核日志零行。
+
+**还差的**：
+
+- RustDesk 没装。要它用上，进程里要有 `LIBVA_DRIVER_NAME=qcom`（不设的话拿到默认驱动，ffmpeg 找
+  不到编码入口）；Wayland 下抓屏要经 portal，这台手机上行不行没试过。装不装机主决定。
+- `rate-change.cpp:61` 有一处编译警告（花括号初始化里的类型窄化，补丁 0002 的测试），报上游前清掉。
