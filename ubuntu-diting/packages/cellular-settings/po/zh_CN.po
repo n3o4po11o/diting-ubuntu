@@ -35,113 +35,113 @@ msgstr "已应用，并保留到下次开机"
 msgid "Applied"
 msgstr "已应用"
 
-#: src/main.rs:178
+#: src/main.rs:200 src/ui.rs:240
 msgid "Cellular Settings"
 msgstr "蜂窝网络设置"
 
-#: src/main.rs:225
+#: src/main.rs:263
 msgid "connected"
 msgstr "已连接"
 
-#: src/main.rs:225
+#: src/main.rs:263
 msgid "not connected"
 msgstr "未连接"
 
-#: src/main.rs:227
+#: src/main.rs:265
 msgid "automatic"
 msgstr "自动连接"
 
-#: src/main.rs:229
+#: src/main.rs:267
 msgid "manual"
 msgstr "手动连接"
 
-#: src/main.rs:234
+#: src/main.rs:272
 msgid "APN {}"
 msgstr "接入点 {}"
 
-#: src/main.rs:234
+#: src/main.rs:272
 msgid "{} dials"
 msgstr "拨号 {} 次"
 
-#: src/main.rs:256
+#: src/main.rs:294
 msgid "No system bus: {}"
 msgstr "没有系统总线：{}"
 
-#: src/main.rs:275
+#: src/main.rs:313
 msgid "Connection saved"
 msgstr "连接已保存"
 
-#: src/main.rs:279
+#: src/main.rs:317
 msgid "NetworkManager has no device for the modem"
 msgstr "NetworkManager 里没有基带的设备"
 
-#: src/main.rs:281
+#: src/main.rs:319
 msgid "Dialling"
 msgstr "正在拨号"
 
-#: src/main.rs:290
+#: src/main.rs:328
 msgid "Connection deleted"
 msgstr "连接已删除"
 
-#: src/main.rs:295
+#: src/main.rs:333
 msgid "Forgotten: the modem's own defaults apply at the next boot."
 msgstr "已忘记：下次开机用基带自己的默认值。"
 
-#: src/main.rs:360
+#: src/main.rs:398
 msgid "No modem"
 msgstr "没有基带"
 
-#: src/main.rs:363
+#: src/main.rs:401
 msgid "No EPS UE mode chosen"
 msgstr "没有选择 EPS UE 模式"
 
-#: src/main.rs:366
+#: src/main.rs:404
 msgid "No network mode chosen"
 msgstr "没有选择网络模式"
 
-#: src/main.rs:396
+#: src/main.rs:434
 msgid "{}, because: {}"
 msgstr "{}, 原因：{}"
 
-#: src/main.rs:400 src/main.rs:609 src/modemmode.rs:343 src/names.rs:128
+#: src/main.rs:438 src/main.rs:647 src/modemmode.rs:343 src/names.rs:128
 msgid "None"
 msgstr "无"
 
-#: src/main.rs:403 src/main.rs:417
+#: src/main.rs:441 src/main.rs:455
 msgid "{} ({})"
 msgstr "{}（{}）"
 
-#: src/main.rs:407
+#: src/main.rs:445
 msgid "{} %"
 msgstr "{} %"
 
-#: src/main.rs:414
+#: src/main.rs:452
 msgid "an unknown network"
 msgstr "未知网络"
 
-#: src/main.rs:421
+#: src/main.rs:459
 msgid "{} ({}), on {} for {}"
 msgstr "{}（{}），制式 {}，网络 {}"
 
-#: src/main.rs:434
+#: src/main.rs:472
 msgid "{} (as the modem reports it)"
 msgstr "{}（基带读回的值）"
 
-#: src/main.rs:442 src/names.rs:15 src/names.rs:35 src/names.rs:67
+#: src/main.rs:480 src/names.rs:15 src/names.rs:35 src/names.rs:67
 #: src/names.rs:80 src/names.rs:95 src/names.rs:105 src/names.rs:116
 #: src/names.rs:165
 msgid "Unknown"
 msgstr "未知"
 
-#: src/main.rs:444
+#: src/main.rs:482
 msgid "{} {}"
 msgstr "{} {}"
 
-#: src/main.rs:450
+#: src/main.rs:488
 msgid "Not available: {}"
 msgstr "不可用：{}"
 
-#: src/main.rs:531
+#: src/main.rs:569
 msgid ""
 "4G on its own, 5G on its own, 4G with 5G, and a combination of several "
 "technologies without a preferred one are missing from this list: "
@@ -150,7 +150,7 @@ msgstr ""
 "这个列表里没有仅 4G、仅 5G、4G 加 5G，也没有“多种制式、不指定优先”的组合："
 "ModemManager 没有为这台基带列出它们，设置了也会被拒绝。"
 
-#: src/main.rs:533
+#: src/main.rs:571
 msgid ""
 "4G on its own, 5G on its own and 4G with 5G are missing from this list: "
 "ModemManager does not offer them for this modem, and refuses them."
@@ -158,7 +158,7 @@ msgstr ""
 "这个列表里没有仅 4G、仅 5G、4G 加 5G：ModemManager 没有为这台基带列出它们，设"
 "置了也会被拒绝。"
 
-#: src/main.rs:535
+#: src/main.rs:573
 msgid ""
 "A combination of several technologies without a preferred one is missing "
 "from this list: ModemManager does not offer it for this modem, and refuses "
@@ -167,65 +167,65 @@ msgstr ""
 "这个列表里没有“多种制式、不指定优先”的组合：ModemManager 没有为这台基带列出"
 "它，设置了也会被拒绝。"
 
-#: src/main.rs:554
+#: src/main.rs:592
 msgid "The phone may use {}, and looks for {} first."
 msgstr "手机可以使用 {}，并优先搜索 {}。"
 
-#: src/main.rs:555
+#: src/main.rs:593
 msgid "The phone uses only {}."
 msgstr "手机只使用 {}。"
 
-#: src/main.rs:556
+#: src/main.rs:594
 msgid "The phone may use {}, in whatever order the modem searches."
 msgstr "手机可以使用 {}，顺序由基带决定。"
 
-#: src/main.rs:567
+#: src/main.rs:605
 msgid "Not on this device: diting-modem-setup is not installed."
 msgstr "这台设备上不可用：没有安装 diting-modem-setup。"
 
-#: src/main.rs:568
+#: src/main.rs:606
 msgid "Not readable: {}"
 msgstr "读取失败：{}"
 
-#: src/main.rs:569
+#: src/main.rs:607
 msgid "Nothing saved: the modem's own defaults apply at boot."
 msgstr "没有保存任何内容：开机时用基带自己的默认值。"
 
-#: src/main.rs:575
+#: src/main.rs:613
 msgid "{}; {}"
 msgstr "{}；{}"
 
-#: src/main.rs:596
+#: src/main.rs:634
 msgid "{}, {}: {}"
 msgstr "{}, {}: {}"
 
-#: src/main.rs:598
+#: src/main.rs:636
 msgid "{}, {}"
 msgstr "{}, {}"
 
-#: src/main.rs:600
+#: src/main.rs:638
 msgid "None: NetworkManager does not manage the modem"
 msgstr "无：NetworkManager 没有管理这个基带"
 
-#: src/main.rs:614
+#: src/main.rs:652
 msgid ""
 "More than one mobile data connection: the redial watchdog dials the first "
 "one, {}."
 msgstr "有多个移动数据连接：重拨看门狗拨的是第一个，{}。"
 
-#: src/main.rs:624
+#: src/main.rs:662
 msgid "Connect"
 msgstr "连接"
 
-#: src/main.rs:631
+#: src/main.rs:669
 msgid "Edit"
 msgstr "编辑"
 
-#: src/main.rs:633 src/ui.rs:597
+#: src/main.rs:671 src/ui.rs:627
 msgid "Delete"
 msgstr "删除"
 
-#: src/main.rs:645
+#: src/main.rs:683
 msgid "NetworkManager is not available: {}"
 msgstr "NetworkManager 不可用：{}"
 
@@ -637,7 +637,7 @@ msgstr "网络已关闭"
 msgid "reason {}"
 msgstr "原因码 {}"
 
-#: src/ui.rs:128
+#: src/ui.rs:142
 msgid ""
 "EPS only, voice-centric: the phone uses only the 4G/5G network and puts "
 "calls first: where VoLTE is missing, it is not content with data alone. On a "
@@ -647,7 +647,7 @@ msgstr ""
 "仅 EPS，面向语音：手机只使用 4G/5G 网络，并且以通话为先：没有 VoLTE 时，它不"
 "会安心只用数据。在没有 2G/3G 的网络上这项没有用，那种情况通常选下一项。"
 
-#: src/ui.rs:130
+#: src/ui.rs:144
 msgid ""
 "EPS only, data-centric: the phone uses only the 4G/5G network and puts data "
 "first. It stays registered on a carrier that has no 2G/3G network for this "
@@ -658,7 +658,7 @@ msgstr ""
 "运营商（比如中国电信）上能保持注册、不再掉线。代价是通话要靠 VoLTE：没有 "
 "VoLTE 就打不了电话。"
 
-#: src/ui.rs:132
+#: src/ui.rs:146
 msgid ""
 "EPS and non-EPS, voice-centric: the phone uses 4G/5G and also the old 2G/3G "
 "network for calls and SMS, and puts calls first. This is the modem's own "
@@ -671,7 +671,7 @@ msgstr ""
 "如中国电信）注册会每几分钟掉一次，网络拒绝的原因是「CS domain not "
 "available」。"
 
-#: src/ui.rs:134
+#: src/ui.rs:148
 msgid ""
 "EPS and non-EPS, data-centric: the phone uses 4G/5G and the old 2G/3G "
 "network, and puts data first. Right where the carrier has a 2G/3G network "
@@ -681,66 +681,66 @@ msgstr ""
 "EPS 与非 EPS，面向数据：手机用 4G/5G 和老的 2G/3G 网络，以数据为先。运营商有 "
 "2G/3G 网络、而你更看重数据时选它。没有 2G/3G 的话，注册同样会每几分钟掉一次。"
 
-#: src/ui.rs:143
+#: src/ui.rs:157
 msgid "EPS: the 4G and 5G network. Everything on it is data."
 msgstr "EPS：4G 和 5G 网络，上面传的都是数据。"
 
-#: src/ui.rs:144
+#: src/ui.rs:158
 msgid ""
 "Non-EPS, or the circuit-switched (CS) domain: the older 2G and 3G network, "
 "made for calls and SMS."
 msgstr ""
 "非 EPS，也就是电路域（CS）：老的 2G 和 3G 网络，是为打电话和收发短信建的。"
 
-#: src/ui.rs:146
+#: src/ui.rs:160
 msgid ""
 "PS only: the phone asks for data service only, so it registers on 4G/5G "
 "alone."
 msgstr "仅 PS：手机只请求数据业务，所以只在 4G/5G 上注册。"
 
-#: src/ui.rs:147
+#: src/ui.rs:161
 msgid ""
 "CS and PS: the phone asks for calls and SMS as well, so it also registers on "
 "2G/3G."
 msgstr "CS 和 PS：手机同时请求通话和短信业务，所以也在 2G/3G 上注册。"
 
-#: src/ui.rs:148
+#: src/ui.rs:162
 msgid ""
 "Voice-centric: calls come first. The phone wants a network on which it can "
 "call."
 msgstr "面向语音：通话优先。手机想要一个能打电话的网络。"
 
-#: src/ui.rs:149
+#: src/ui.rs:163
 msgid ""
 "Data-centric: data comes first. The phone stays on 4G/5G even where it could "
 "not call."
 msgstr "面向数据：数据优先。即使在打不了电话的地方，手机也留在 4G/5G 上。"
 
-#: src/ui.rs:151
+#: src/ui.rs:165
 msgid "VoLTE: calls over the 4G/5G network, with no 2G/3G network behind them."
 msgstr "VoLTE：通过 4G/5G 网络打电话，后面不需要 2G/3G 网络。"
 
-#: src/ui.rs:206
+#: src/ui.rs:220
 msgid "Not done"
 msgstr "没有完成"
 
-#: src/ui.rs:209
+#: src/ui.rs:223
 msgid "Close"
 msgstr "关闭"
 
-#: src/ui.rs:226 src/ui.rs:403
+#: src/ui.rs:256 src/ui.rs:433
 msgid "Status"
 msgstr "状态"
 
-#: src/ui.rs:228 src/ui.rs:268
+#: src/ui.rs:258 src/ui.rs:298
 msgid "Network"
 msgstr "网络"
 
-#: src/ui.rs:230
+#: src/ui.rs:260
 msgid "Mobile data"
 msgstr "移动数据"
 
-#: src/ui.rs:239
+#: src/ui.rs:269
 msgid ""
 "The network refused this modem because it has no 2G/3G network for it. “EPS "
 "only, data-centric” on the Network page keeps the registration up; calls "
@@ -749,59 +749,59 @@ msgstr ""
 "网络拒绝了这台基带，因为它没有可供这台手机使用的 2G/3G 网络。在“网络”页选“仅 "
 "EPS，面向数据”可以保持注册；此后通话需要 VoLTE。"
 
-#: src/ui.rs:241
+#: src/ui.rs:271
 msgid "Network page"
 msgstr "网络页"
 
-#: src/ui.rs:249
+#: src/ui.rs:279
 msgid "State"
 msgstr "状态"
 
-#: src/ui.rs:250
+#: src/ui.rs:280
 msgid "Operator"
 msgstr "运营商"
 
-#: src/ui.rs:251
+#: src/ui.rs:281
 msgid "Access technology"
 msgstr "接入制式"
 
-#: src/ui.rs:252
+#: src/ui.rs:282
 msgid "Signal quality"
 msgstr "信号强度"
 
-#: src/ui.rs:253
+#: src/ui.rs:283
 msgid "Registration"
 msgstr "注册"
 
-#: src/ui.rs:254
+#: src/ui.rs:284
 msgid "Packet service"
 msgstr "分组业务"
 
-#: src/ui.rs:255
+#: src/ui.rs:285
 msgid "Network rejection"
 msgstr "网络拒绝"
 
-#: src/ui.rs:256 src/ui.rs:286
+#: src/ui.rs:286 src/ui.rs:316
 msgid "EPS UE mode of operation"
 msgstr "EPS UE 工作模式"
 
-#: src/ui.rs:257 src/ui.rs:314
+#: src/ui.rs:287 src/ui.rs:344
 msgid "Network mode"
 msgstr "网络模式"
 
-#: src/ui.rs:258
+#: src/ui.rs:288
 msgid "Power"
 msgstr "电源"
 
-#: src/ui.rs:259
+#: src/ui.rs:289
 msgid "Firmware"
 msgstr "固件"
 
-#: src/ui.rs:261
+#: src/ui.rs:291
 msgid "Modem"
 msgstr "基带"
 
-#: src/ui.rs:279
+#: src/ui.rs:309
 msgid ""
 "The network has no 2G/3G network for this modem. “EPS only, data-centric” "
 "keeps the registration up; calls then need VoLTE."
@@ -809,35 +809,35 @@ msgstr ""
 "这个网络没有可供这台基带使用的 2G/3G 网络。“仅 EPS，面向数据”可以保持注册；此"
 "后通话需要 VoLTE。"
 
-#: src/ui.rs:287
+#: src/ui.rs:317
 msgid "How the phone registers: for data only, or for calls and SMS as well."
 msgstr "手机怎样注册：只注册数据，还是连通话和短信一起注册。"
 
-#: src/ui.rs:291
+#: src/ui.rs:321
 msgid "What these words mean"
 msgstr "这些词是什么意思"
 
-#: src/ui.rs:292
+#: src/ui.rs:322
 msgid "EPS, CS and PS, voice-centric, data-centric, VoLTE."
 msgstr "EPS、CS 和 PS、面向语音、面向数据、VoLTE。"
 
-#: src/ui.rs:308
+#: src/ui.rs:338
 msgid "Network preference"
 msgstr "网络偏好"
 
-#: src/ui.rs:315
+#: src/ui.rs:345
 msgid "The technologies the phone may use, and the one it looks for first."
 msgstr "手机可以使用的制式，以及优先搜索的那一个。"
 
-#: src/ui.rs:345
+#: src/ui.rs:375
 msgid "Apply"
 msgstr "应用"
 
-#: src/ui.rs:356
+#: src/ui.rs:386
 msgid "Keep for next boot"
 msgstr "保留到下次开机"
 
-#: src/ui.rs:357
+#: src/ui.rs:387
 msgid ""
 "With Apply: write the choice to /etc/diting/modem-mode, which diting-modem-"
 "setup reads at every boot."
@@ -845,111 +845,111 @@ msgstr ""
 "点“应用”时把选择写进 /etc/diting/modem-mode，diting-modem-setup 每次开机都读"
 "它。"
 
-#: src/ui.rs:364
+#: src/ui.rs:394
 msgid "Saved for next boot"
 msgstr "已保留到下次开机"
 
-#: src/ui.rs:365
+#: src/ui.rs:395
 msgid "Forget"
 msgstr "忘记"
 
-#: src/ui.rs:367
+#: src/ui.rs:397
 msgid "Next boot"
 msgstr "下次开机"
 
-#: src/ui.rs:371
+#: src/ui.rs:401
 msgid ""
 "Applied at once. The preferred technology is the order in which the modem "
 "searches for a network, so it shows at the next search."
 msgstr "立即生效。优先制式决定基带搜索网络的顺序，要到下一次搜网才看得出。"
 
-#: src/ui.rs:401
+#: src/ui.rs:431
 msgid "Modem device"
 msgstr "基带设备"
 
-#: src/ui.rs:402
+#: src/ui.rs:432
 msgid "Active connection"
 msgstr "活动连接"
 
-#: src/ui.rs:407
+#: src/ui.rs:437
 msgid "Mobile data connections"
 msgstr "移动数据连接"
 
-#: src/ui.rs:409 src/ui.rs:442
+#: src/ui.rs:439 src/ui.rs:472
 msgid "New connection"
 msgstr "新建连接"
 
-#: src/ui.rs:417
+#: src/ui.rs:447
 msgid ""
 "A connection that drops is dialled again by the redial watchdog, so there is "
 "no way to disconnect from here."
 msgstr "连接断了会被重拨看门狗重新拨上，所以这里没有断开按钮。"
 
-#: src/ui.rs:442
+#: src/ui.rs:472
 msgid "Edit connection"
 msgstr "编辑连接"
 
-#: src/ui.rs:446
+#: src/ui.rs:476
 msgid "Name"
 msgstr "名称"
 
-#: src/ui.rs:447
+#: src/ui.rs:477
 msgid "Access point name (APN)"
 msgstr "接入点名称（APN）"
 
-#: src/ui.rs:448
+#: src/ui.rs:478
 msgid "Username (optional)"
 msgstr "用户名（可选）"
 
-#: src/ui.rs:451
+#: src/ui.rs:481
 msgid "Password (optional; unchanged unless you type one)"
 msgstr "密码（可选；不改，除非你输入一个）"
 
-#: src/ui.rs:453
+#: src/ui.rs:483
 msgid "Password (optional)"
 msgstr "密码（可选）"
 
-#: src/ui.rs:456
+#: src/ui.rs:486
 msgid "Identity"
 msgstr "身份"
 
-#: src/ui.rs:463
+#: src/ui.rs:493
 msgid "IP type"
 msgstr "IP 类型"
 
-#: src/ui.rs:464
+#: src/ui.rs:494
 msgid "Automatic lets the modem try IPv4 and IPv6, then each alone."
 msgstr "“自动”让基带先试 IPv4 和 IPv6，再分别单独试。"
 
-#: src/ui.rs:466
+#: src/ui.rs:496
 msgid "Automatic"
 msgstr "自动"
 
-#: src/ui.rs:466
+#: src/ui.rs:496
 msgid "IPv4"
 msgstr "IPv4"
 
-#: src/ui.rs:466
+#: src/ui.rs:496
 msgid "IPv6"
 msgstr "IPv6"
 
-#: src/ui.rs:466
+#: src/ui.rs:496
 msgid "IPv4 and IPv6"
 msgstr "IPv4 和 IPv6"
 
-#: src/ui.rs:468
+#: src/ui.rs:498
 msgid "Connect automatically"
 msgstr "自动连接"
 
-#: src/ui.rs:469
+#: src/ui.rs:499
 msgid "As soon as the modem is registered."
 msgstr "基带一注册上就连接。"
 
-#: src/ui.rs:472
+#: src/ui.rs:502
 msgid "Dials before giving up"
 msgstr "放弃前的拨号次数"
 
-#: src/ui.rs:473
+#: src/ui.rs:503
 msgid ""
 "One leaves the retries to the redial watchdog and its back-off. Many in a "
 "row make the network throttle the modem for minutes."
@@ -957,30 +957,30 @@ msgstr ""
 "填 1 就把重拨交给重拨看门狗，它会退避。连续多次拨号会让网络把基带限流好几分"
 "钟。"
 
-#: src/ui.rs:476
+#: src/ui.rs:506
 msgid "Home network only"
 msgstr "仅归属网络"
 
-#: src/ui.rs:477
+#: src/ui.rs:507
 msgid "Do not register on other networks."
 msgstr "不在其他网络上注册。"
 
-#: src/ui.rs:479
+#: src/ui.rs:509
 msgid "Behaviour"
 msgstr "行为"
 
-#: src/ui.rs:496 src/ui.rs:596
+#: src/ui.rs:526 src/ui.rs:626
 msgid "Cancel"
 msgstr "取消"
 
-#: src/ui.rs:504
+#: src/ui.rs:534
 msgid "Save"
 msgstr "保存"
 
-#: src/ui.rs:593
+#: src/ui.rs:623
 msgid "Delete “{}”?"
 msgstr "删除“{}”？"
 
-#: src/ui.rs:594
+#: src/ui.rs:624
 msgid "The connection profile is removed from NetworkManager."
 msgstr "这个连接配置会从 NetworkManager 里删除。"

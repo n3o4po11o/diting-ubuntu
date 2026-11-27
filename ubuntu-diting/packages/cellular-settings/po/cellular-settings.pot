@@ -35,179 +35,179 @@ msgstr ""
 msgid "Applied"
 msgstr ""
 
-#: src/main.rs:178
+#: src/main.rs:200 src/ui.rs:240
 msgid "Cellular Settings"
 msgstr ""
 
-#: src/main.rs:225
+#: src/main.rs:263
 msgid "connected"
 msgstr ""
 
-#: src/main.rs:225
+#: src/main.rs:263
 msgid "not connected"
 msgstr ""
 
-#: src/main.rs:227
+#: src/main.rs:265
 msgid "automatic"
 msgstr ""
 
-#: src/main.rs:229
+#: src/main.rs:267
 msgid "manual"
 msgstr ""
 
-#: src/main.rs:234
+#: src/main.rs:272
 msgid "APN {}"
 msgstr ""
 
-#: src/main.rs:234
+#: src/main.rs:272
 msgid "{} dials"
 msgstr ""
 
-#: src/main.rs:256
+#: src/main.rs:294
 msgid "No system bus: {}"
 msgstr ""
 
-#: src/main.rs:275
+#: src/main.rs:313
 msgid "Connection saved"
 msgstr ""
 
-#: src/main.rs:279
+#: src/main.rs:317
 msgid "NetworkManager has no device for the modem"
 msgstr ""
 
-#: src/main.rs:281
+#: src/main.rs:319
 msgid "Dialling"
 msgstr ""
 
-#: src/main.rs:290
+#: src/main.rs:328
 msgid "Connection deleted"
 msgstr ""
 
-#: src/main.rs:295
+#: src/main.rs:333
 msgid "Forgotten: the modem's own defaults apply at the next boot."
 msgstr ""
 
-#: src/main.rs:360
+#: src/main.rs:398
 msgid "No modem"
 msgstr ""
 
-#: src/main.rs:363
+#: src/main.rs:401
 msgid "No EPS UE mode chosen"
 msgstr ""
 
-#: src/main.rs:366
+#: src/main.rs:404
 msgid "No network mode chosen"
 msgstr ""
 
-#: src/main.rs:396
+#: src/main.rs:434
 msgid "{}, because: {}"
 msgstr ""
 
-#: src/main.rs:400 src/main.rs:609 src/modemmode.rs:343 src/names.rs:128
+#: src/main.rs:438 src/main.rs:647 src/modemmode.rs:343 src/names.rs:128
 msgid "None"
 msgstr ""
 
-#: src/main.rs:403 src/main.rs:417
+#: src/main.rs:441 src/main.rs:455
 msgid "{} ({})"
 msgstr ""
 
-#: src/main.rs:407
+#: src/main.rs:445
 msgid "{} %"
 msgstr ""
 
-#: src/main.rs:414
+#: src/main.rs:452
 msgid "an unknown network"
 msgstr ""
 
-#: src/main.rs:421
+#: src/main.rs:459
 msgid "{} ({}), on {} for {}"
 msgstr ""
 
-#: src/main.rs:434
+#: src/main.rs:472
 msgid "{} (as the modem reports it)"
 msgstr ""
 
-#: src/main.rs:442 src/names.rs:15 src/names.rs:35 src/names.rs:67 src/names.rs:80 src/names.rs:95 src/names.rs:105 src/names.rs:116 src/names.rs:165
+#: src/main.rs:480 src/names.rs:15 src/names.rs:35 src/names.rs:67 src/names.rs:80 src/names.rs:95 src/names.rs:105 src/names.rs:116 src/names.rs:165
 msgid "Unknown"
 msgstr ""
 
-#: src/main.rs:444
+#: src/main.rs:482
 msgid "{} {}"
 msgstr ""
 
-#: src/main.rs:450
+#: src/main.rs:488
 msgid "Not available: {}"
 msgstr ""
 
-#: src/main.rs:531
+#: src/main.rs:569
 msgid "4G on its own, 5G on its own, 4G with 5G, and a combination of several technologies without a preferred one are missing from this list: ModemManager does not offer them for this modem, and refuses them."
 msgstr ""
 
-#: src/main.rs:533
+#: src/main.rs:571
 msgid "4G on its own, 5G on its own and 4G with 5G are missing from this list: ModemManager does not offer them for this modem, and refuses them."
 msgstr ""
 
-#: src/main.rs:535
+#: src/main.rs:573
 msgid "A combination of several technologies without a preferred one is missing from this list: ModemManager does not offer it for this modem, and refuses it."
 msgstr ""
 
-#: src/main.rs:554
+#: src/main.rs:592
 msgid "The phone may use {}, and looks for {} first."
 msgstr ""
 
-#: src/main.rs:555
+#: src/main.rs:593
 msgid "The phone uses only {}."
 msgstr ""
 
-#: src/main.rs:556
+#: src/main.rs:594
 msgid "The phone may use {}, in whatever order the modem searches."
 msgstr ""
 
-#: src/main.rs:567
+#: src/main.rs:605
 msgid "Not on this device: diting-modem-setup is not installed."
 msgstr ""
 
-#: src/main.rs:568
+#: src/main.rs:606
 msgid "Not readable: {}"
 msgstr ""
 
-#: src/main.rs:569
+#: src/main.rs:607
 msgid "Nothing saved: the modem's own defaults apply at boot."
 msgstr ""
 
-#: src/main.rs:575
+#: src/main.rs:613
 msgid "{}; {}"
 msgstr ""
 
-#: src/main.rs:596
+#: src/main.rs:634
 msgid "{}, {}: {}"
 msgstr ""
 
-#: src/main.rs:598
+#: src/main.rs:636
 msgid "{}, {}"
 msgstr ""
 
-#: src/main.rs:600
+#: src/main.rs:638
 msgid "None: NetworkManager does not manage the modem"
 msgstr ""
 
-#: src/main.rs:614
+#: src/main.rs:652
 msgid "More than one mobile data connection: the redial watchdog dials the first one, {}."
 msgstr ""
 
-#: src/main.rs:624
+#: src/main.rs:662
 msgid "Connect"
 msgstr ""
 
-#: src/main.rs:631
+#: src/main.rs:669
 msgid "Edit"
 msgstr ""
 
-#: src/main.rs:633 src/ui.rs:597
+#: src/main.rs:671 src/ui.rs:627
 msgid "Delete"
 msgstr ""
 
-#: src/main.rs:645
+#: src/main.rs:683
 msgid "NetworkManager is not available: {}"
 msgstr ""
 
@@ -619,290 +619,290 @@ msgstr ""
 msgid "reason {}"
 msgstr ""
 
-#: src/ui.rs:128
+#: src/ui.rs:142
 msgid "EPS only, voice-centric: the phone uses only the 4G/5G network and puts calls first: where VoLTE is missing, it is not content with data alone. On a network without 2G/3G this does not help; the usual choice there is the next one."
 msgstr ""
 
-#: src/ui.rs:130
+#: src/ui.rs:144
 msgid "EPS only, data-centric: the phone uses only the 4G/5G network and puts data first. It stays registered on a carrier that has no 2G/3G network for this phone, such as China Telecom. Calls then need VoLTE: without it, no calls are possible."
 msgstr ""
 
-#: src/ui.rs:132
+#: src/ui.rs:146
 msgid "EPS and non-EPS, voice-centric: the phone uses 4G/5G and also the old 2G/3G network for calls and SMS, and puts calls first. This is the modem's own default. It is right where the carrier has a 2G/3G network. Where it has none, as with China Telecom, the registration drops every few minutes: the network refuses with “CS domain not available”."
 msgstr ""
 
-#: src/ui.rs:134
+#: src/ui.rs:148
 msgid "EPS and non-EPS, data-centric: the phone uses 4G/5G and the old 2G/3G network, and puts data first. Right where the carrier has a 2G/3G network and data matters more than calls. Where it has none, the registration drops every few minutes, as with the previous one."
 msgstr ""
 
-#: src/ui.rs:143
+#: src/ui.rs:157
 msgid "EPS: the 4G and 5G network. Everything on it is data."
 msgstr ""
 
-#: src/ui.rs:144
+#: src/ui.rs:158
 msgid "Non-EPS, or the circuit-switched (CS) domain: the older 2G and 3G network, made for calls and SMS."
 msgstr ""
 
-#: src/ui.rs:146
+#: src/ui.rs:160
 msgid "PS only: the phone asks for data service only, so it registers on 4G/5G alone."
 msgstr ""
 
-#: src/ui.rs:147
+#: src/ui.rs:161
 msgid "CS and PS: the phone asks for calls and SMS as well, so it also registers on 2G/3G."
 msgstr ""
 
-#: src/ui.rs:148
+#: src/ui.rs:162
 msgid "Voice-centric: calls come first. The phone wants a network on which it can call."
 msgstr ""
 
-#: src/ui.rs:149
+#: src/ui.rs:163
 msgid "Data-centric: data comes first. The phone stays on 4G/5G even where it could not call."
 msgstr ""
 
-#: src/ui.rs:151
+#: src/ui.rs:165
 msgid "VoLTE: calls over the 4G/5G network, with no 2G/3G network behind them."
 msgstr ""
 
-#: src/ui.rs:206
+#: src/ui.rs:220
 msgid "Not done"
 msgstr ""
 
-#: src/ui.rs:209
+#: src/ui.rs:223
 msgid "Close"
 msgstr ""
 
-#: src/ui.rs:226 src/ui.rs:403
+#: src/ui.rs:256 src/ui.rs:433
 msgid "Status"
 msgstr ""
 
-#: src/ui.rs:228 src/ui.rs:268
+#: src/ui.rs:258 src/ui.rs:298
 msgid "Network"
 msgstr ""
 
-#: src/ui.rs:230
+#: src/ui.rs:260
 msgid "Mobile data"
 msgstr ""
 
-#: src/ui.rs:239
+#: src/ui.rs:269
 msgid "The network refused this modem because it has no 2G/3G network for it. “EPS only, data-centric” on the Network page keeps the registration up; calls then need VoLTE."
 msgstr ""
 
-#: src/ui.rs:241
+#: src/ui.rs:271
 msgid "Network page"
 msgstr ""
 
-#: src/ui.rs:249
+#: src/ui.rs:279
 msgid "State"
 msgstr ""
 
-#: src/ui.rs:250
+#: src/ui.rs:280
 msgid "Operator"
 msgstr ""
 
-#: src/ui.rs:251
+#: src/ui.rs:281
 msgid "Access technology"
 msgstr ""
 
-#: src/ui.rs:252
+#: src/ui.rs:282
 msgid "Signal quality"
 msgstr ""
 
-#: src/ui.rs:253
+#: src/ui.rs:283
 msgid "Registration"
 msgstr ""
 
-#: src/ui.rs:254
+#: src/ui.rs:284
 msgid "Packet service"
 msgstr ""
 
-#: src/ui.rs:255
+#: src/ui.rs:285
 msgid "Network rejection"
 msgstr ""
 
-#: src/ui.rs:256 src/ui.rs:286
+#: src/ui.rs:286 src/ui.rs:316
 msgid "EPS UE mode of operation"
 msgstr ""
 
-#: src/ui.rs:257 src/ui.rs:314
+#: src/ui.rs:287 src/ui.rs:344
 msgid "Network mode"
 msgstr ""
 
-#: src/ui.rs:258
+#: src/ui.rs:288
 msgid "Power"
 msgstr ""
 
-#: src/ui.rs:259
+#: src/ui.rs:289
 msgid "Firmware"
 msgstr ""
 
-#: src/ui.rs:261
+#: src/ui.rs:291
 msgid "Modem"
 msgstr ""
 
-#: src/ui.rs:279
+#: src/ui.rs:309
 msgid "The network has no 2G/3G network for this modem. “EPS only, data-centric” keeps the registration up; calls then need VoLTE."
 msgstr ""
 
-#: src/ui.rs:287
+#: src/ui.rs:317
 msgid "How the phone registers: for data only, or for calls and SMS as well."
 msgstr ""
 
-#: src/ui.rs:291
+#: src/ui.rs:321
 msgid "What these words mean"
 msgstr ""
 
-#: src/ui.rs:292
+#: src/ui.rs:322
 msgid "EPS, CS and PS, voice-centric, data-centric, VoLTE."
 msgstr ""
 
-#: src/ui.rs:308
+#: src/ui.rs:338
 msgid "Network preference"
 msgstr ""
 
-#: src/ui.rs:315
+#: src/ui.rs:345
 msgid "The technologies the phone may use, and the one it looks for first."
 msgstr ""
 
-#: src/ui.rs:345
+#: src/ui.rs:375
 msgid "Apply"
 msgstr ""
 
-#: src/ui.rs:356
+#: src/ui.rs:386
 msgid "Keep for next boot"
 msgstr ""
 
-#: src/ui.rs:357
+#: src/ui.rs:387
 msgid "With Apply: write the choice to /etc/diting/modem-mode, which diting-modem-setup reads at every boot."
 msgstr ""
 
-#: src/ui.rs:364
+#: src/ui.rs:394
 msgid "Saved for next boot"
 msgstr ""
 
-#: src/ui.rs:365
+#: src/ui.rs:395
 msgid "Forget"
 msgstr ""
 
-#: src/ui.rs:367
+#: src/ui.rs:397
 msgid "Next boot"
 msgstr ""
 
-#: src/ui.rs:371
+#: src/ui.rs:401
 msgid "Applied at once. The preferred technology is the order in which the modem searches for a network, so it shows at the next search."
 msgstr ""
 
-#: src/ui.rs:401
+#: src/ui.rs:431
 msgid "Modem device"
 msgstr ""
 
-#: src/ui.rs:402
+#: src/ui.rs:432
 msgid "Active connection"
 msgstr ""
 
-#: src/ui.rs:407
+#: src/ui.rs:437
 msgid "Mobile data connections"
 msgstr ""
 
-#: src/ui.rs:409 src/ui.rs:442
+#: src/ui.rs:439 src/ui.rs:472
 msgid "New connection"
 msgstr ""
 
-#: src/ui.rs:417
+#: src/ui.rs:447
 msgid "A connection that drops is dialled again by the redial watchdog, so there is no way to disconnect from here."
 msgstr ""
 
-#: src/ui.rs:442
+#: src/ui.rs:472
 msgid "Edit connection"
 msgstr ""
 
-#: src/ui.rs:446
+#: src/ui.rs:476
 msgid "Name"
 msgstr ""
 
-#: src/ui.rs:447
+#: src/ui.rs:477
 msgid "Access point name (APN)"
 msgstr ""
 
-#: src/ui.rs:448
+#: src/ui.rs:478
 msgid "Username (optional)"
 msgstr ""
 
-#: src/ui.rs:451
+#: src/ui.rs:481
 msgid "Password (optional; unchanged unless you type one)"
 msgstr ""
 
-#: src/ui.rs:453
+#: src/ui.rs:483
 msgid "Password (optional)"
 msgstr ""
 
-#: src/ui.rs:456
+#: src/ui.rs:486
 msgid "Identity"
 msgstr ""
 
-#: src/ui.rs:463
+#: src/ui.rs:493
 msgid "IP type"
 msgstr ""
 
-#: src/ui.rs:464
+#: src/ui.rs:494
 msgid "Automatic lets the modem try IPv4 and IPv6, then each alone."
 msgstr ""
 
-#: src/ui.rs:466
+#: src/ui.rs:496
 msgid "Automatic"
 msgstr ""
 
-#: src/ui.rs:466
+#: src/ui.rs:496
 msgid "IPv4"
 msgstr ""
 
-#: src/ui.rs:466
+#: src/ui.rs:496
 msgid "IPv6"
 msgstr ""
 
-#: src/ui.rs:466
+#: src/ui.rs:496
 msgid "IPv4 and IPv6"
 msgstr ""
 
-#: src/ui.rs:468
+#: src/ui.rs:498
 msgid "Connect automatically"
 msgstr ""
 
-#: src/ui.rs:469
+#: src/ui.rs:499
 msgid "As soon as the modem is registered."
 msgstr ""
 
-#: src/ui.rs:472
+#: src/ui.rs:502
 msgid "Dials before giving up"
 msgstr ""
 
-#: src/ui.rs:473
+#: src/ui.rs:503
 msgid "One leaves the retries to the redial watchdog and its back-off. Many in a row make the network throttle the modem for minutes."
 msgstr ""
 
-#: src/ui.rs:476
+#: src/ui.rs:506
 msgid "Home network only"
 msgstr ""
 
-#: src/ui.rs:477
+#: src/ui.rs:507
 msgid "Do not register on other networks."
 msgstr ""
 
-#: src/ui.rs:479
+#: src/ui.rs:509
 msgid "Behaviour"
 msgstr ""
 
-#: src/ui.rs:496 src/ui.rs:596
+#: src/ui.rs:526 src/ui.rs:626
 msgid "Cancel"
 msgstr ""
 
-#: src/ui.rs:504
+#: src/ui.rs:534
 msgid "Save"
 msgstr ""
 
-#: src/ui.rs:593
+#: src/ui.rs:623
 msgid "Delete “{}”?"
 msgstr ""
 
-#: src/ui.rs:594
+#: src/ui.rs:624
 msgid "The connection profile is removed from NetworkManager."
 msgstr ""

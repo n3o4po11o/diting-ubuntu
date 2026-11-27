@@ -173,15 +173,53 @@ fn main() -> glib::ExitCode {
 	application.run()
 }
 
+/// `CELLULAR_SETTINGS_SNAPSHOT=DIR/NAME@PAGE[@WIDTHxHEIGHT]`, in its parts:
+/// where to write, which page, and the size of the window if one is given.
+/// The size is the default size of the window, which a compositor may
+/// ignore: Phosh sizes a window itself, so it is for one that does not
+/// (broadway, the headless display of GTK), to see a page as a wide or a
+/// short window has it without turning the phone. A page name has no "x",
+/// so the last field is a size when it has one.
+fn parse_snapshot(target: &str) -> (String, String, Option<(i32, i32)>) {
+	let mut rest = target;
+	let mut size = None;
+	if let Some((before, last)) = rest.rsplit_once('@') {
+		if let Some((Ok(width), Ok(height))) = last.split_once('x').map(|(w, h)| (w.parse::<i32>(), h.parse::<i32>())) {
+			rest = before;
+			size = Some((width, height));
+		}
+	}
+	match rest.rsplit_once('@') {
+		Some((directory, name)) => (directory.to_string(), name.to_string(), size),
+		None => (rest.to_string(), ui::PAGES[0].to_string(), size),
+	}
+}
+
 fn build(application: &adw::Application, snapshot: Option<String>) {
 	let win = adw::ApplicationWindow::new(application);
 	win.set_title(Some(&t!("Cellular Settings")));
-	win.set_default_size(390, 760);
+	let (width, height) = parse_snapshot(snapshot.as_deref().unwrap_or("")).2.unwrap_or((390, 760));
+	win.set_default_size(width, height);
 
 	let (tx, rx) = async_channel::unbounded::<Msg>();
 	let updating = Rc::new(Cell::new(false));
 	let widgets = ui::build(tx.clone(), updating.clone());
 	win.set_content(Some(&widgets.toast));
+	// Under 500 sp wide (this phone upright is 305): the pages as tabs under
+	// the content. From 500 sp (it is 678 on its side): the tabs in the
+	// header bar in place of the title, and their height goes to the
+	// content. This phone's screen is 610 high on its side: the tabs under
+	// the content were below it (2026-11-27). MinWidth: the breakpoint is
+	// the wide window, from the value up.
+	let wide = adw::Breakpoint::new(adw::BreakpointCondition::new_length(
+		adw::BreakpointConditionLengthType::MinWidth,
+		500.0,
+		adw::LengthUnit::Sp,
+	));
+	wide.add_setter(&widgets.switcher_bottom, "visible", Some(&glib::Value::from(false)));
+	wide.add_setter(&widgets.title, "visible", Some(&glib::Value::from(false)));
+	wide.add_setter(&widgets.switcher_top, "visible", Some(&glib::Value::from(true)));
+	win.add_breakpoint(wide);
 	win.present();
 
 	let mut app = App {
@@ -679,9 +717,9 @@ impl App {
 			return;
 		}
 		self.snapshot_started = true;
-		let (directory, name) = match target.rsplit_once('@') {
-			Some((directory, name)) => (directory.to_string(), name.to_string()),
-			None => (target.clone(), ui::PAGES[0].to_string()),
+		let (directory, name) = {
+			let (directory, name, _) = parse_snapshot(&target);
+			(directory, name)
 		};
 		let page: &'static str = ui::PAGES.iter().find(|page| **page == name).copied().unwrap_or(ui::PAGES[0]);
 		self.w.stack.set_visible_child_name(page);
@@ -696,5 +734,22 @@ impl App {
 			app.quit();
 			glib::ControlFlow::Break
 		});
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::parse_snapshot;
+
+	#[test]
+	fn the_snapshot_variable_in_its_parts() {
+		let parts = parse_snapshot("/tmp/s");
+		assert_eq!((parts.0.as_str(), parts.1.as_str(), parts.2), ("/tmp/s", "status", None));
+		let parts = parse_snapshot("/tmp/s@network");
+		assert_eq!((parts.0.as_str(), parts.1.as_str(), parts.2), ("/tmp/s", "network", None));
+		let parts = parse_snapshot("/tmp/s@network@760x390");
+		assert_eq!((parts.0.as_str(), parts.1.as_str(), parts.2), ("/tmp/s", "network", Some((760, 390))));
+		let parts = parse_snapshot("/tmp/s@network@wide");
+		assert_eq!((parts.0.as_str(), parts.1.as_str(), parts.2), ("/tmp/s@network", "wide", None));
 	}
 }

@@ -18,3 +18,6 @@ gettext
 dpkg-dev debhelper fakeroot file
 # in the image only: ci/cellular-settings.sh runs make in tmux inside the container
 tmux
+# in the image only: broadway, the headless display of GTK, on which the program
+# on the phone renders a page at any size (packages/cellular-settings/README.md)
+libgtk-4-bin

@@ -71,6 +71,12 @@ pub struct Data {
 pub struct Widgets {
 	pub toast: adw::ToastOverlay,
 	pub stack: adw::ViewStack,
+	/// the pages as tabs under the content: in a window narrower than 500 sp
+	pub switcher_bottom: adw::ViewSwitcher,
+	/// the same tabs in the header bar: from 500 sp (main.rs adds the breakpoint)
+	pub switcher_top: adw::ViewSwitcher,
+	/// the title of the window in the header bar, where the tabs are not
+	pub title: gtk::Label,
 	pub status: Status,
 	pub network: Network,
 	pub data: Data,
@@ -90,8 +96,12 @@ fn group(title: String) -> adw::PreferencesGroup {
 	adw::PreferencesGroup::builder().title(title).build()
 }
 
-/// The page: its widgets in one column, narrow enough to read on a phone.
-fn page(children: &[&gtk::Widget]) -> adw::Clamp {
+/// A page: its widgets in one column, narrow enough to read on a phone, and
+/// scrolling when the window is shorter than it is. A window is never
+/// smaller than its content, and without the scrolling the Network page
+/// made it 906 high: on its side the phone has 610, and the tabs under the
+/// content were below the screen (2026-11-27).
+fn page(children: &[&gtk::Widget]) -> gtk::ScrolledWindow {
 	let column = gtk::Box::builder()
 		.orientation(gtk::Orientation::Vertical)
 		.spacing(12)
@@ -105,7 +115,11 @@ fn page(children: &[&gtk::Widget]) -> adw::Clamp {
 	}
 	let clamp = adw::Clamp::builder().maximum_size(600).tightening_threshold(480).build();
 	clamp.set_child(Some(&column));
-	clamp
+	gtk::ScrolledWindow::builder()
+		.hscrollbar_policy(gtk::PolicyType::Never)
+		.vscrollbar_policy(gtk::PolicyType::Automatic)
+		.child(&clamp)
+		.build()
 }
 
 /// A paragraph under the lists, in the dim colour of a note.
@@ -234,12 +248,28 @@ pub fn failure(parent: &adw::ApplicationWindow, text: String) {
 pub fn build(tx: Sender<Msg>, updating: Rc<Cell<bool>>) -> Widgets {
 	let toast = adw::ToastOverlay::new();
 	let toolbar = adw::ToolbarView::new();
-	toolbar.add_top_bar(&adw::HeaderBar::new());
 	let stack = adw::ViewStack::new();
-	let switcher = adw::ViewSwitcher::new();
-	switcher.set_stack(Some(&stack));
-	switcher.set_policy(adw::ViewSwitcherPolicy::Narrow);
-	toolbar.add_bottom_bar(&switcher);
+
+	// The header shows the title, or, from 500 sp wide, the pages as tabs:
+	// main.rs adds the breakpoint that switches. A GtkBox measures only its
+	// visible children, so the title does not reserve the tabs' width.
+	let header = adw::HeaderBar::new();
+	let titles = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).build();
+	let title = gtk::Label::builder()
+		.label(t!("Cellular Settings"))
+		.single_line_mode(true)
+		.ellipsize(gtk::pango::EllipsizeMode::End)
+		.css_classes(["title"])
+		.build();
+	titles.append(&title);
+	let switcher_top =
+		adw::ViewSwitcher::builder().stack(&stack).policy(adw::ViewSwitcherPolicy::Wide).visible(false).build();
+	titles.append(&switcher_top);
+	header.set_title_widget(Some(&titles));
+	toolbar.add_top_bar(&header);
+	// under the content in a narrow window
+	let switcher_bottom = adw::ViewSwitcher::builder().stack(&stack).policy(adw::ViewSwitcherPolicy::Narrow).build();
+	toolbar.add_bottom_bar(&switcher_bottom);
 
 	let (status, status_page) = status_page(tx.clone());
 	stack.add_titled_with_icon(&status_page, Some(STATUS), &t!("Status"), "dialog-information-symbolic");
@@ -250,10 +280,10 @@ pub fn build(tx: Sender<Msg>, updating: Rc<Cell<bool>>) -> Widgets {
 
 	toolbar.set_content(Some(&stack));
 	toast.set_child(Some(&toolbar));
-	Widgets { toast, stack, status, network, data }
+	Widgets { toast, stack, switcher_bottom, switcher_top, title, status, network, data }
 }
 
-fn status_page(tx: Sender<Msg>) -> (Status, adw::Clamp) {
+fn status_page(tx: Sender<Msg>) -> (Status, gtk::ScrolledWindow) {
 	let banner = adw::Banner::builder()
 		.title(t!(
 			"The network refused this modem because it has no 2G/3G network for it. \
@@ -296,7 +326,7 @@ fn status_page(tx: Sender<Msg>) -> (Status, adw::Clamp) {
 	(status, page(&[banner.upcast_ref(), modem.upcast_ref(), network.upcast_ref()]))
 }
 
-fn network_page(tx: Sender<Msg>, updating: Rc<Cell<bool>>) -> (Network, adw::Clamp) {
+fn network_page(tx: Sender<Msg>, updating: Rc<Cell<bool>>) -> (Network, gtk::ScrolledWindow) {
 	let banner = adw::Banner::builder()
 		.title(t!(
 			"The network has no 2G/3G network for this modem. “EPS only, data-centric” \
@@ -425,7 +455,7 @@ fn network_page(tx: Sender<Msg>, updating: Rc<Cell<bool>>) -> (Network, adw::Cla
 	(widgets, page)
 }
 
-fn data_page(tx: Sender<Msg>) -> (Data, adw::Clamp) {
+fn data_page(tx: Sender<Msg>) -> (Data, gtk::ScrolledWindow) {
 	let device = row(t!("Modem device"));
 	let active = row(t!("Active connection"));
 	let state = group(t!("Status"));

@@ -86,6 +86,21 @@ Apply), and uses ModemManager's method only where the tool is not.
   height 51 and natural height 50 in measure()". It is the box of
   libadwaita's view switcher with the labels of that language, one pixel
   out; nothing is cut, and it is not this program's widget.
+- **On its side, the phone lost the tabs** (the owner saw it on 2026-11-27).
+  The pages were a column in a clamp, with nothing to scroll: a window is
+  never smaller than its content, and the Network page made it 906 high,
+  where the screen on its side has 610. The tabs under the content were
+  below the screen. The pages scroll now, so the window takes the size of
+  the screen in any position; and from 500 sp wide a breakpoint moves the
+  tabs into the header bar in place of the title (this phone is 305 sp
+  upright and 678 on its side). Two mistakes on the way, each seen in a
+  picture: `MaxWidth` in a breakpoint means "from the value down", so the
+  wide window is `MinWidth`; and a `GtkStack` as the title widget of the
+  header bar shows one child, whichever is visible, so the title and the
+  tabs are in a `GtkBox`, where visibility is all. Tried on the phone in
+  both positions, and on a headless display at 499 and 500 px, where the
+  layout changes, and at 678x200, where the whole Network page is in a
+  window 200 px high.
 
 ## Build
 
@@ -154,6 +169,32 @@ is reinstalled: close and reopen it.
   window as a PNG and quits: to look at a page without a hand on the
   phone. A window takes a moment to be drawn, and under a locked screen
   the compositor stops showing it after a few seconds: one page per run.
+  From the desktop session, so that polkit and the compositor take it for
+  a window of the session; on a session bus of its own
+  (`dbus-run-session`), so that the window the owner has open is left
+  alone.
+- `…@page@WIDTHxHEIGHT` after that is the size of the window, on a display
+  that lets a window choose it. Phosh does not (it sizes a window itself),
+  so the phone was turned to see a page on its side. Broadway, the
+  headless display of GTK, does: the program on the phone renders on one
+  served by the build container, with its own fonts, locale and modem, at
+  any size, and the screen of the owner is not touched. The sizes are in
+  pixels at scale 1, the phone's in sp: upright it is 305 wide and on its
+  side 678x281. `libgtk-4-bin` is in the package list of the image for it.
+
+        # in the container, once: the server looks for its socket in the
+        # cache directory, the program for it in the runtime directory, so both
+        # are given the same one, under /src where the phone sees it too
+        W=/src/ubuntu-diting/work
+        XDG_CACHE_HOME=$W/broadway-cache /usr/bin/gtk4-broadwayd :5 &
+        # on the phone, the installed program
+        R=$HOME/k50ultra/diting-ubuntu/ubuntu-diting/work/broadway-cache
+        dbus-run-session -- env HOME=$HOME XDG_RUNTIME_DIR=$R \
+            GDK_BACKEND=broadway BROADWAY_DISPLAY=:5 \
+            CELLULAR_SETTINGS_SNAPSHOT=/tmp/shots@network@678x281 cellular-settings
+
+  The first run of this found the two mistakes of the landscape layout
+  above, before the phone was turned: a picture at 499 and at 500 px.
 
 Not done on the phone, by a hand: the Apply button as a whole (the NAS
 tool, the writing of the file and the two ModemManager calls were each
